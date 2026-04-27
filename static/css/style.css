@@ -2,41 +2,41 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg: #1a1b2e;
-  --bg-surface: #232540;
-  --bg-input: #2a2d4a;
-  --text: #e2e8f0;
-  --text-muted: #94a3b8;
-  --accent: #818cf8;
-  --accent-hover: #6366f1;
-  --user-bubble: #3b3f75;
-  --assistant-bubble: #2a2d4a;
-  --border: #373a5c;
-  --tool-bg: #1e2038;
-  --tool-border: #4338ca;
-  --thinking-bg: #1a2332;
-  --thinking-border: #0ea5e9;
-  --danger: #ef4444;
-  --success: #22c55e;
+  --bg: #1c1a17;
+  --bg-surface: #242120;
+  --bg-input: #2e2b27;
+  --text: #e2ddd5;
+  --text-muted: #8d877d;
+  --accent: #cc785c;
+  --accent-hover: #d4956f;
+  --user-bubble: #3a2b22;
+  --assistant-bubble: #2e2b27;
+  --border: #3f3b34;
+  --tool-bg: #1e1c18;
+  --tool-border: #cc785c;
+  --thinking-bg: #1e1c18;
+  --thinking-border: #ae6d53;
+  --danger: #a84b3a;
+  --success: #2e7c4c;
   --radius: 10px;
   --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
 }
 
 [data-theme="light"] {
-  --bg: #f8fafc;
-  --bg-surface: #ffffff;
-  --bg-input: #f1f5f9;
-  --text: #1e293b;
-  --text-muted: #64748b;
-  --accent: #6366f1;
-  --accent-hover: #4f46e5;
-  --user-bubble: #c7d2fe;
-  --assistant-bubble: #f1f5f9;
-  --border: #e2e8f0;
-  --tool-bg: #f0f9ff;
-  --tool-border: #3b82f6;
-  --thinking-bg: #f0f9ff;
-  --thinking-border: #0ea5e9;
+  --bg: #faf9f5;
+  --bg-surface: #f0eee6;
+  --bg-input: #f3f1e9;
+  --text: #1a1917;
+  --text-muted: #6b665f;
+  --accent: #cc785c;
+  --accent-hover: #b85f3d;
+  --user-bubble: #eae7df;
+  --assistant-bubble: #f3f1e9;
+  --border: #d9d5cc;
+  --tool-bg: #f0eee6;
+  --tool-border: #cc785c;
+  --thinking-bg: #f0eee6;
+  --thinking-border: #ae6d53;
 }
 
 html, body {
@@ -148,7 +148,7 @@ body {
 
 /* Inline code */
 .bubble :not(pre) > code {
-  background: rgba(129, 140, 248, 0.15);
+  background: rgba(204, 120, 92, 0.15);
   padding: 1px 5px;
   border-radius: 4px;
   font-family: var(--font-mono);
@@ -157,8 +157,8 @@ body {
 
 /* Pre/code block */
 .bubble pre {
-  background: #0d0f1a;
-  color: #e2e8f0;
+  background: #141310;
+  color: #e2ddd5;
   padding: 12px;
   border-radius: 8px;
   overflow-x: auto;
@@ -167,8 +167,8 @@ body {
 }
 
 [data-theme="light"] .bubble pre {
-  background: #1e293b;
-  color: #e2e8f0;
+  background: #1e1c18;
+  color: #e2ddd5;
 }
 
 /* ===== Thinking blocks (collapsible) ===== */
@@ -202,7 +202,7 @@ body {
   color: var(--accent);
   font-size: 0.82rem;
   user-select: none;
-  background: rgba(99, 102, 241, 0.08);
+  background: rgba(204, 120, 92, 0.08);
 }
 
 .tool-header:hover { opacity: 0.85; }
@@ -308,10 +308,10 @@ body {
   padding: 6px 18px;
   font-size: 0.85rem;
   z-index: 100;
-  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+  box-shadow: 0 4px 12px rgba(168, 75, 58, 0.4);
 }
 
-#btn-abort:hover { background: #dc2626; }
+#btn-abort:hover { background: #8f3e2f; }
 
 /* ===== Input area ===== */
 #input-area {
