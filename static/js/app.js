@@ -173,7 +173,7 @@ function renderMarkdown(text) {
 // ── UI State ──────────────────────────────────────────────────────────
 
 let assistantEl = null;       // Current streaming message .bubble element
-let assistantTextEl = null;   // Text container inside the bubble (keeps thinking/tool blocks separate)
+let currentTextEl = null;     // Current text segment receiving deltas (null when in tool/thinking block)
 let thinkingEl = null;        // Current thinking content element
 let toolEl = null;            // Current tool block element
 let queueItems = [];
@@ -281,9 +281,9 @@ function dispatchToUI(data) {
 function onAgentStart(data) {
   // If we already have an assistant bubble streaming, finalize it first
   if (assistantEl) {
-    const raw = assistantTextEl ? assistantTextEl.getAttribute("data-raw") : assistantEl.getAttribute("data-raw");
+    const raw = currentTextEl ? currentTextEl.getAttribute("data-raw") : assistantEl.getAttribute("data-raw");
     if (raw) {
-      if (assistantTextEl) assistantTextEl.removeAttribute("data-raw");
+      if (currentTextEl) currentTextEl.removeAttribute("data-raw");
       else assistantEl.removeAttribute("data-raw");
     }
   }
@@ -291,11 +291,7 @@ function onAgentStart(data) {
   // Create new assistant message placeholder
   const msg = createMessage("assistant", null);
   assistantEl = msg.bubble;
-
-  // Create a text container inside the bubble so thinking/tool blocks aren't wiped by innerHTML updates
-  assistantTextEl = document.createElement("div");
-  assistantTextEl.className = "assistant-text";
-  assistantEl.appendChild(assistantTextEl);
+  currentTextEl = null;
 
   thinkingEl = null;
   toolEl = null;
@@ -307,7 +303,7 @@ function onAgentEnd(data) {
   $("#loading-indicator").classList.add("hidden");
   $("#btn-abort").classList.add("hidden");
   assistantEl = null;
-  assistantTextEl = null;
+  currentTextEl = null;
   thinkingEl = null;
   toolEl = null;
 }
@@ -328,29 +324,34 @@ function onMessageUpdate(evt) {
         const msg = createMessage("assistant", null);
         assistantEl = msg.bubble;
       }
-      if (!assistantTextEl) {
-        assistantTextEl = document.createElement("div");
-        assistantTextEl.className = "assistant-text";
-        assistantEl.appendChild(assistantTextEl);
+      if (!currentTextEl) {
+        currentTextEl = document.createElement("div");
+        currentTextEl.className = "assistant-text";
+        assistantEl.appendChild(currentTextEl);
       }
       break;
 
     case "text_delta":
-      if (assistantTextEl && evt.delta) {
-        // Append raw text, then re-render markdown into the text container only
-        // This preserves thinking/tool blocks that are siblings of assistantTextEl
-        let rawText = assistantTextEl.getAttribute("data-raw") || "";
+      if (evt.delta) {
+        // Create a new text segment if one doesn't exist yet
+        // (handles text_start not firing, or text resuming after a tool/thinking block)
+        if (!currentTextEl) {
+          currentTextEl = document.createElement("div");
+          currentTextEl.className = "assistant-text";
+          assistantEl.appendChild(currentTextEl);
+        }
+        let rawText = currentTextEl.getAttribute("data-raw") || "";
         rawText += evt.delta;
-        assistantTextEl.setAttribute("data-raw", rawText);
-        assistantTextEl.innerHTML = renderMarkdown(rawText);
+        currentTextEl.setAttribute("data-raw", rawText);
+        currentTextEl.innerHTML = renderMarkdown(rawText);
       }
       scrollBottom();
       break;
 
     case "text_end":
       // Finalize — clear raw data attribute from text container
-      if (assistantTextEl) {
-        assistantTextEl.removeAttribute("data-raw");
+      if (currentTextEl) {
+        currentTextEl.removeAttribute("data-raw");
       }
       scrollBottom();
       break;
@@ -387,13 +388,9 @@ function createThinkingBlock() {
   block.className = "thinking-block";
   thinkingEl = block;
 
-  // Insert thinking block before the text container so it appears first
-  // even when text_delta updates assistantTextEl.innerHTML
-  if (assistantTextEl) {
-    assistantEl.insertBefore(block, assistantTextEl);
-  } else {
-    assistantEl.appendChild(block);
-  }
+  // Freeze current text segment so future deltas create a new one after this block
+  currentTextEl = null;
+  assistantEl.appendChild(block);
 }
 
 // ── Tool execution ────────────────────────────────────────────────────
@@ -432,12 +429,9 @@ function onToolExecutionStart(evt) {
     block.classList.toggle("open");
   });
 
-  // Insert before text container so tools/thinking appear above the text
-  if (assistantTextEl) {
-    assistantEl.insertBefore(block, assistantTextEl);
-  } else {
-    assistantEl.appendChild(block);
-  }
+  // Freeze current text segment so future deltas create a new one after this block
+  currentTextEl = null;
+  assistantEl.appendChild(block);
   toolEl = block;
   scrollBottom();
 }
