@@ -124,7 +124,6 @@ body {
 .message.assistant .message-avatar { background: var(--bg-input); color: var(--text-muted); }
 
 .message-content { max-width: 75%; min-width: 60px; }
-.message.user .message-content { text-align: right; }
 
 .bubble {
   display: block;
