@@ -126,48 +126,14 @@ function escapeHtml(str) {
   return d.innerHTML;
 }
 
-// Simple markdown renderer (no deps)
+// Markdown renderer via marked library (loaded from CDN in index.html)
 function renderMarkdown(text) {
-  let html = text;
-
-  // Code blocks: ```lang ... ```
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-    return `<pre><code class="language-${lang}">${escapeHtml(code.trim())}</code></pre>`;
+  if (!text) return '';
+  marked.setOptions({
+    breaks: true,  // single newlines → <br>
+    gfm: true,     // GitHub Flavored Markdown
   });
-
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-  // Bold / Italic
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-
-  // Headers
-  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-
-  // Blockquotes
-  html = html.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
-
-  // Unordered lists
-  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
-  html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
-
-  // Numbered lists
-  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-
-  // Paragraphs (double newlines)
-  html = html.replace(/\n\n/g, '</p><p>');
-  html = html.replace(/\n/g, '<br>');
-  html = `<p>${html}</p>`;
-
-  // Clean up empty paragraphs and nested tags
-  html = html.replace(/<p><(pre|ul|ol|h[1-3]|blockquote)/g, '<$1');
-  html = html.replace(/<\/(pre|ul|ol|h[1-3]|blockquote)><\/p>/g, '</$1>');
-  html = html.replace(/<p><\/p>/g, '');
-
-  return html;
+  return marked.parse(text);
 }
 
 // ── UI State ──────────────────────────────────────────────────────────
