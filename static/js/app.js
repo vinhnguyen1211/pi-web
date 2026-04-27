@@ -172,12 +172,71 @@ function renderMarkdown(text) {
 
 // ── UI State ──────────────────────────────────────────────────────────
 
-let assistantEl = null;       // Current streaming message .bubble element
-let currentTextEl = null;     // Current text segment receiving deltas (null when in tool/thinking block)
-let thinkingEl = null;        // Current thinking content element
-let toolEl = null;            // Current tool block element
+let assistantEl = null;             // Current streaming message .bubble element
+let currentTextEl = null;           // Current text segment receiving deltas (null when in tool/thinking block)
+let thinkingEl = null;              // Current thinking content element
+let toolBlocks = new Map();         // toolCallId -> { block, outputEl, statusEl, name, argsStr }
+let activeToolCallId = null;        // Currently streaming tool execution
+let pendingToolCalls = new Map();   // toolUseId -> { name, args } (from toolcall_start/end before execution)
 let queueItems = [];
-let pendingUIRequest = null;  // { id, method, resolve } for extension_ui_request
+let pendingUIRequest = null;        // { id, method, resolve } for extension_ui_request
+
+// ── Content Helpers ───────────────────────────────────────────────────
+
+/** Extract plain text from a content array: [{ type: "text", text: "..." }, ...] */
+function extractTextFromContent(content) {
+  if (!content) return "";
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((b) => b && b.type === "text")
+      .map((b) => b.text || "")
+      .join("\n");
+  }
+  // Fallback: try to serialize
+  return JSON.stringify(content, null, 2);
+}
+
+/** Create a closed tool block DOM element (for history or toolcall_end without execution). */
+function buildToolBlock(toolName, argsStr, outputText, status, open) {
+  const block = document.createElement("div");
+  block.className = `tool-block${open ? " open" : ""}`;
+
+  let statusHtml;
+  if (status === "running") {
+    statusHtml = '<span class="tool-status status-running">⟳ Running…</span>';
+  } else if (status === "error") {
+    statusHtml = '<span class="tool-status" style="color:var(--danger)">✗ Failed</span>';
+  } else if (status === "success") {
+    statusHtml = '<span class="tool-status" style="color:var(--success)">✓ Done</span>';
+  } else {
+    statusHtml = '';
+  }
+
+  const outputContent = outputText !== undefined && outputText !== null
+    ? `<div class="tool-label" style="margin-top:6px;">Output:</div><pre class="tool-output">${escapeHtml(outputText)}</pre>`
+    : '';
+
+  block.innerHTML = `
+    <div class="tool-header">
+      <span class="tool-arrow">▶</span>
+      <span class="tool-name">🔧 ${escapeHtml(toolName)}</span>
+      ${statusHtml}
+    </div>
+    <div class="tool-body">
+      <div class="tool-label">Args:</div>
+      <pre class="tool-args">${escapeHtml(argsStr || "")}</pre>
+      ${outputContent}
+    </div>
+  `;
+
+  // Toggle on click
+  block.querySelector(".tool-header").addEventListener("click", () => {
+    block.classList.toggle("open");
+  });
+
+  return block;
+}
 
 // ── Message Creation ──────────────────────────────────────────────────
 
@@ -221,12 +280,49 @@ async function loadMessageHistory() {
 
     for (const msg of messages) {
       const role = msg.role || msg.type || "assistant";
-      const text = msg.content || msg.text || msg.message || "";
-      if (text) {
-        createMessage(
-          role === "user" ? "user" : "assistant",
-          role === "user" ? escapeHtml(text) : renderMarkdown(text)
-        );
+
+      // Handle array content (can mix text + toolCall blocks)
+      if (Array.isArray(msg.content)) {
+        const displayRole = role === "user" ? "user" : "assistant";
+        if (displayRole === "assistant") {
+          const { bubble } = createMessage("assistant", null);
+          for (const block of msg.content) {
+            if (!block) continue;
+            if (block.type === "text" && block.text) {
+              const textEl = document.createElement("div");
+              textEl.className = "assistant-text";
+              textEl.innerHTML = renderMarkdown(block.text);
+              bubble.appendChild(textEl);
+            } else if (block.type === "toolCall") {
+              const toolName = block.name || block.toolName || "tool";
+              const argsStr = typeof block.arguments === "string"
+                ? block.arguments
+                : JSON.stringify(block.arguments, null, 2);
+              const resultText = block.result !== undefined
+                ? (typeof block.result === "string" ? block.result : extractTextFromContent(block.result))
+                : undefined;
+              const isError = !!block.isError || !!block.error;
+              const toolBlock = buildToolBlock(toolName, argsStr, resultText, isError ? "error" : "success", false);
+              bubble.appendChild(toolBlock);
+            }
+          }
+        } else {
+          // User message: join text blocks
+          const text = msg.content
+            .filter((b) => b.type === "text")
+            .map((b) => b.text)
+            .join("\n");
+          if (text) createMessage("user", escapeHtml(text));
+        }
+      } else {
+        // Legacy: content is a plain string
+        const text = msg.content || msg.text || msg.message || "";
+        if (text) {
+          createMessage(
+            role === "user" ? "user" : "assistant",
+            role === "user" ? escapeHtml(text) : renderMarkdown(text)
+          );
+        }
       }
     }
     scrollBottom();
@@ -249,16 +345,16 @@ function dispatchToUI(data) {
       onAgentEnd(data);
       break;
     case "tool_execution_start":
-      onToolExecutionStart(data.toolExecutionEvent);
+      onToolExecutionStart(data);          // data IS the event
       break;
     case "tool_execution_update":
-      onToolExecutionUpdate(data.toolExecutionEvent);
+      onToolExecutionUpdate(data);         // data IS the event
       break;
     case "tool_execution_end":
-      onToolExecutionEnd(data.toolExecutionEvent);
+      onToolExecutionEnd(data);            // data IS the event
       break;
     case "queue_update":
-      onQueueUpdate(data.queueUpdate || {});
+      onQueueUpdate(data);                 // data has steering/followUp directly
       break;
     case "compaction_start":
       $("#compaction-overlay").classList.remove("hidden");
@@ -294,7 +390,9 @@ function onAgentStart(data) {
   currentTextEl = null;
 
   thinkingEl = null;
-  toolEl = null;
+  toolBlocks.clear();
+  activeToolCallId = null;
+  pendingToolCalls.clear();
   $("#loading-indicator").classList.remove("hidden");
   scrollBottom();
 }
@@ -305,7 +403,9 @@ function onAgentEnd(data) {
   assistantEl = null;
   currentTextEl = null;
   thinkingEl = null;
-  toolEl = null;
+  toolBlocks.clear();
+  activeToolCallId = null;
+  pendingToolCalls.clear();
 }
 
 // ── Message update (streaming text / thinking) ────────────────────────
@@ -376,6 +476,53 @@ function onMessageUpdate(evt) {
       }
       scrollBottom();
       break;
+
+    // ── Tool call deltas (LLM announcing tool use, before execution) ──
+
+    case "toolcall_start":
+      // LLM is starting to call a tool. Store the pending call.
+      const startId = evt.toolCall?.id || evt.id || `tc_${Date.now()}`;
+      pendingToolCalls.set(startId, {
+        name: evt.toolCall?.name || evt.name || "tool",
+        args: "",
+      });
+      break;
+
+    case "toolcall_delta":
+      // Streaming arguments for the tool call.
+      if (evt.delta && evt.toolUseId) {
+        const pending = pendingToolCalls.get(evt.toolUseId);
+        if (pending) {
+          pending.args += typeof evt.delta === "string" ? evt.delta : JSON.stringify(evt.delta);
+        }
+      }
+      break;
+
+    case "toolcall_end":
+      // LLM finished announcing the tool call. If we haven't seen execution yet,
+      // show a collapsed placeholder that will be replaced when execution starts.
+      const endTool = evt.toolCall || {};
+      const endId = endTool.id || evt.toolUseId;
+      const pending = endId ? pendingToolCalls.get(endId) : null;
+      const tcName = endTool.name || pending?.name || "tool";
+      const tcArgs = endTool.arguments !== undefined
+        ? (typeof endTool.arguments === "string" ? endTool.arguments : JSON.stringify(endTool.arguments, null, 2))
+        : pending?.args || "";
+
+      // Only show placeholder if no execution block exists yet for this call
+      if (!toolBlocks.has(endId) && assistantEl) {
+        const placeholder = buildToolBlock(tcName, tcArgs, undefined, "running", false);
+        assistantEl.appendChild(placeholder);
+        toolBlocks.set(endId, {
+          block: placeholder,
+          outputEl: placeholder.querySelector(".tool-output"),
+          statusEl: placeholder.querySelector(".tool-status"),
+          name: tcName,
+          argsStr: tcArgs,
+        });
+      }
+      scrollBottom();
+      break;
   }
 }
 
@@ -404,103 +551,154 @@ function onToolExecutionStart(evt) {
     assistantEl = msg.bubble;
   }
 
-  const block = document.createElement("div");
-  block.className = "tool-block open";
-
+  const toolCallId = evt.toolCallId || `tc_${Date.now()}`;
   const toolName = evt.toolName || evt.name || "tool";
   const argsStr = evt.args ? (typeof evt.args === "string" ? evt.args : JSON.stringify(evt.args, null, 2)) : "";
 
-  block.innerHTML = `
-    <div class="tool-header">
-      <span class="tool-arrow">▶</span>
-      <span class="tool-name">🔧 ${escapeHtml(toolName)}</span>
-      <span class="tool-status status-running">⟳ Running…</span>
-    </div>
-    <div class="tool-body">
-      <div class="tool-label">Args:</div>
-      <pre class="tool-args">${escapeHtml(argsStr)}</pre>
-      <div class="tool-label" style="margin-top:6px;">Output:</div>
-      <pre class="tool-output"></pre>
-    </div>
-  `;
+  // If a placeholder already exists from toolcall_end, replace it
+  if (toolBlocks.has(toolCallId)) {
+    const existing = toolBlocks.get(toolCallId);
+    existing.block.classList.add("open");
+    return; // Already rendered, just open it
+  }
 
-  // Toggle on click
-  block.querySelector(".tool-header").addEventListener("click", () => {
-    block.classList.toggle("open");
+  const block = buildToolBlock(toolName, argsStr, undefined, "running", true);
+  assistantEl.appendChild(block);
+
+  toolBlocks.set(toolCallId, {
+    block,
+    outputEl: block.querySelector(".tool-output"),
+    statusEl: block.querySelector(".tool-status"),
+    name: toolName,
+    argsStr,
   });
 
-  // Freeze current text segment so future deltas create a new one after this block
-  currentTextEl = null;
-  assistantEl.appendChild(block);
-  toolEl = block;
+  activeToolCallId = toolCallId;
+  currentTextEl = null;  // Freeze text so future deltas create a new segment after this block
   scrollBottom();
 }
 
 function onToolExecutionUpdate(evt) {
-  if (!evt || !toolEl) return;
-  const outputEl = toolEl.querySelector(".tool-output");
-  if (outputEl && evt.output) {
-    let raw = outputEl.getAttribute("data-raw") || "";
-    raw += evt.output;
-    outputEl.setAttribute("data-raw", raw);
-    outputEl.textContent = raw;
+  if (!evt) return;
+
+  const toolCallId = evt.toolCallId || activeToolCallId;
+  if (!toolCallId) return;  // No way to correlate this update
+
+  const entry = toolBlocks.get(toolCallId);
+  if (!entry || !entry.outputEl) {
+    // Try to create the block on-the-fly (start event might have been missed)
+    if (!toolBlocks.has(toolCallId)) {
+      return; // Can't render without a block
+    }
+    return;
   }
+
+  // partialResult is an accumulated object: { content: [{ type: "text", text: "..." }] }
+  const partialResult = evt.partialResult || evt.output;
+  if (partialResult) {
+    const text = extractTextFromContent(partialResult);
+    if (text) {
+      entry.outputEl.textContent = text;  // Replace (it's accumulated, not delta)
+    }
+  }
+
   scrollBottom();
 }
 
 function onToolExecutionEnd(evt) {
-  if (!evt || !toolEl) return;
+  if (!evt) return;
 
-  const statusEl = toolEl.querySelector(".tool-status");
-  if (statusEl) {
-    statusEl.textContent = evt.error ? "✗ Failed" : "✓ Done";
-    statusEl.className = `tool-status status-${evt.error ? "error" : "success"}`;
-    if (evt.error) statusEl.style.color = "var(--danger)";
-    else statusEl.style.color = "var(--success)";
+  const toolCallId = evt.toolCallId || activeToolCallId;
+  if (!toolCallId) return;
+
+  const entry = toolBlocks.get(toolCallId);
+  if (entry) {
+    // isError is a boolean (not evt.error)
+    const failed = !!evt.isError;
+
+    if (entry.statusEl) {
+      entry.statusEl.textContent = failed ? "✗ Failed" : "✓ Done";
+      entry.statusEl.className = `tool-status status-${failed ? "error" : "success"}`;
+      entry.statusEl.style.color = failed ? "var(--danger)" : "var(--success)";
+    }
+
+    // result is { content: [{ type: "text", text: "..." }], details: {...} }
+    if (entry.outputEl && evt.result !== undefined && evt.result !== null) {
+      const text = extractTextFromContent(evt.result);
+      if (text) {
+        entry.outputEl.textContent = text;
+        entry.outputEl.removeAttribute("data-raw");
+      }
+    }
+  } else {
+    // Fallback: start event was missed, create a complete closed block
+    if (!assistantEl) return;
+    const toolName = evt.toolName || evt.name || "tool";
+    const argsStr = evt.args ? (typeof evt.args === "string" ? evt.args : JSON.stringify(evt.args, null, 2)) : "";
+    const outputText = evt.result !== undefined && evt.result !== null
+      ? extractTextFromContent(evt.result)
+      : undefined;
+    const status = evt.isError ? "error" : "success";
+    const block = buildToolBlock(toolName, argsStr, outputText, status, false);
+    assistantEl.appendChild(block);
   }
 
-  // Show final output if available
-  const outputEl = toolEl.querySelector(".tool-output");
-  if (outputEl && evt.result !== undefined && evt.result !== null) {
-    const resultStr = typeof evt.result === "string" ? evt.result : JSON.stringify(evt.result, null, 2);
-    outputEl.textContent = resultStr;
-    outputEl.removeAttribute("data-raw");
-  }
-
-  toolEl = null;
+  activeToolCallId = null;
   scrollBottom();
 }
 
 // ── Queue display ─────────────────────────────────────────────────────
 
 function onQueueUpdate(update) {
-  const items = update.messages || update.items || [];
-  queueItems = items;
+  // RPC event has steering and followUp arrays directly (not nested in queueUpdate)
+  const steering = Array.isArray(update.steering) ? update.steering.map(formatQueueItem).filter(Boolean) : [];
+  const followUp = Array.isArray(update.followUp) ? update.followUp.map(formatQueueItem).filter(Boolean) : [];
+  // Also try legacy fields for safety
+  const legacyItems = (Array.isArray(update.messages) ? update.messages : [])
+    .concat(Array.isArray(update.items) ? update.items : [])
+    .map(formatQueueItem).filter(Boolean);
+
+  queueItems = [...steering, ...followUp, ...legacyItems];
 
   const bar = $("#queue-bar");
   const container = $("#queue-items");
   container.innerHTML = "";
 
-  if (items.length === 0) {
+  if (queueItems.length === 0) {
     bar.classList.add("hidden");
     return;
   }
 
   bar.classList.remove("hidden");
 
-  for (const item of items) {
+  for (const msg of queueItems) {
     const span = document.createElement("span");
     span.className = "queue-item";
-    const msg = typeof item === "string" ? item : (item.message || item.text || JSON.stringify(item));
     span.textContent = msg.length > 40 ? msg.slice(0, 37) + "…" : msg;
     container.appendChild(span);
   }
 }
 
+function formatQueueItem(item) {
+  if (!item) return null;
+  if (typeof item === "string") return item;
+  // Try common field names for queue items
+  if (item.message) return item.message;
+  if (item.text) return item.text;
+  if (item.prompt) return item.prompt;
+  if (item.content) {
+    if (typeof item.content === "string") return item.content;
+    // content might be [{ type: "text", text: "..." }]
+    return extractTextFromContent(item.content);
+  }
+  return null;
+}
+
 // ── Extension UI dialogs ──────────────────────────────────────────────
 
 function onExtensionUIRequest(data) {
-  const req = data.extensionUIEvent || {};
+  // Event fields are top-level; try nested extensionUIEvent as fallback
+  const req = data.extensionUIEvent || data;
   const id = data.id || req.id || "";
   const method = req.method || req.type || "";
 
@@ -691,7 +889,9 @@ document.addEventListener("DOMContentLoaded", () => {
     addSystemMessage("New session started");
     assistantEl = null;
     thinkingEl = null;
-    toolEl = null;
+    toolBlocks.clear();
+    activeToolCallId = null;
+    pendingToolCalls.clear();
   });
 
   // ── Session select ──
