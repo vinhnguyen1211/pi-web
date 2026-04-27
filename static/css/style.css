@@ -175,38 +175,14 @@ body {
 /* ===== Thinking blocks (collapsible) ===== */
 .thinking-block {
   margin: 6px 0;
-  border-left: 3px solid var(--thinking-border);
-  background: var(--thinking-bg);
-  border-radius: 0 6px 6px 0;
-  overflow: hidden;
-}
-
-.thinking-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  cursor: pointer;
-  color: var(--thinking-border);
-  font-size: 0.82rem;
-  user-select: none;
-}
-
-.thinking-header:hover { opacity: 0.85; }
-
-.thinking-content {
-  display: none;
-  padding: 4px 10px 8px;
+  padding: 4px 10px;
   color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 0.82rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  opacity: 0.55;
   white-space: pre-wrap;
+  word-break: break-word;
 }
-
-.thinking-block.open .thinking-content { display: block; }
-.thinking-block.open .thinking-arrow { transform: rotate(90deg); }
-
-.thinking-arrow { transition: transform 0.15s; font-size: 0.7rem; }
 
 /* ===== Tool calls ===== */
 .tool-block {

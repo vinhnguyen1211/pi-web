@@ -384,27 +384,13 @@ function createThinkingBlock() {
   if (!assistantEl) return;
 
   const block = document.createElement("div");
-  block.className = "thinking-block open";
-  block.innerHTML = `
-    <div class="thinking-header">
-      <span class="thinking-arrow">▶</span>
-      <span>💭 Thinking</span>
-    </div>
-    <pre class="thinking-content"></pre>
-  `;
+  block.className = "thinking-block";
+  thinkingEl = block;
 
-  const content = block.querySelector(".thinking-content");
-  thinkingEl = content;
-
-  // Toggle on click
-  block.querySelector(".thinking-header").addEventListener("click", () => {
-    block.classList.toggle("open");
-  });
-
-  // Append thinking block after the text container so it stays visible
+  // Insert thinking block before the text container so it appears first
   // even when text_delta updates assistantTextEl.innerHTML
   if (assistantTextEl) {
-    assistantEl.insertBefore(block, assistantTextEl.nextSibling);
+    assistantEl.insertBefore(block, assistantTextEl);
   } else {
     assistantEl.appendChild(block);
   }
@@ -446,9 +432,9 @@ function onToolExecutionStart(evt) {
     block.classList.toggle("open");
   });
 
-  // Insert after text container so it stays visible during text streaming
+  // Insert before text container so tools/thinking appear above the text
   if (assistantTextEl) {
-    assistantEl.insertBefore(block, assistantTextEl.nextSibling);
+    assistantEl.insertBefore(block, assistantTextEl);
   } else {
     assistantEl.appendChild(block);
   }
