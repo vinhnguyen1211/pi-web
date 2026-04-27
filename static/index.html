@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pi Web</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <!-- Header bar -->
+  <header id="header">
+    <div class="header-left">
+      <span class="logo">π Pi Web</span>
+      <select id="session-select" title="Resume session">
+        <option value="">+ New Session</option>
+      </select>
+      <button id="btn-new-session" title="Start new session">New</button>
+    </div>
+    <div class="header-right">
+      <select id="model-select" title="Model (requires /set_model)">
+        <option value="">Default</option>
+      </select>
+      <button id="btn-theme-toggle" title="Toggle dark/light theme">◑</button>
+    </div>
+  </header>
+
+  <!-- Main chat area -->
+  <main id="chat-container">
+    <div id="messages"></div>
+
+    <!-- Compaction overlay -->
+    <div id="compaction-overlay" class="hidden">
+      <span class="spinner"></span> Compacting context…
+    </div>
+
+    <!-- Loading indicator (shown on agent_start, hidden on agent_end) -->
+    <div id="loading-indicator" class="hidden">
+      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+    </div>
+  </main>
+
+  <!-- Queue display (steer / follow-up items waiting in queue) -->
+  <div id="queue-bar" class="hidden">
+    <span class="queue-label">Queue:</span>
+    <div id="queue-items"></div>
+  </div>
+
+  <!-- Abort button (visible while streaming) -->
+  <button id="btn-abort" class="hidden" title="Abort current response">⏹ Abort</button>
+
+  <!-- Input area -->
+  <footer id="input-area">
+    <textarea
+      id="prompt-input"
+      placeholder="Send a message to Pi…"
+      rows="1"
+      autofocus
+    ></textarea>
+    <button id="btn-send" title="Send">↑</button>
+  </footer>
+
+  <!-- Extension UI modal (select / confirm / input / editor) -->
+  <dialog id="extension-modal">
+    <div class="modal-content">
+      <h3 id="modal-title"></h3>
+      <p id="modal-message"></p>
+      <div id="modal-body"></div>
+      <div class="modal-actions">
+        <button id="modal-btn-cancel" class="hidden">Cancel</button>
+        <button id="modal-btn-confirm">OK</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Extension status notification -->
+  <div id="extension-notify" class="hidden"></div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
