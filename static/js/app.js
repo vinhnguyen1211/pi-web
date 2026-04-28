@@ -1415,8 +1415,13 @@ async function loadSessions() {
     for (const s of sessions.slice(0, 50)) { // Limit to 50 most recent
       const item = document.createElement("div");
       item.className = "session-item";
+      // Use first user message excerpt as the primary label; fall back to session name
+      const displayLabel = s.firstUserMessage || s.name || `Session ${s.id?.slice(0, 8) || "?"}`;
+      // Show project folder basename
+      const projDir = s.cwd ? s.cwd.split("/").pop() : "";
       item.innerHTML = `
-        <span class="session-item-name">${escapeHtml(s.name)}</span>
+        <span class="session-item-name">${escapeHtml(displayLabel)}</span>
+        ${projDir ? `<span class="session-item-project">${escapeHtml(projDir)}</span>` : ``}
         <span class="session-item-meta">${timeSince(s.modTime)}</span>
       `;
       item.title = `${s.entries} entries, ${s.model || "unknown"}`;

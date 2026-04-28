@@ -683,6 +683,16 @@ dialog#extension-modal::backdrop { background: rgba(0, 0, 0, 0.5); }
   white-space: nowrap;
 }
 
+.session-item-project {
+  font-size: 0.7rem;
+  color: var(--accent);
+  background: var(--bg-input);
+  padding: 2px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .session-item-meta {
   font-size: 0.75rem;
   color: var(--text-muted);
