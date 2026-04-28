@@ -453,6 +453,7 @@ function dispatchToUI(data) {
       break;
     case "compaction_end":
       $("#compaction-overlay").classList.add("hidden");
+      updateTokenInfo();
       break;
     case "extension_ui_request":
       onExtensionUIRequest(data);
@@ -466,6 +467,9 @@ function dispatchToUI(data) {
 // ── Agent lifecycle ───────────────────────────────────────────────────
 
 function onAgentStart(data) {
+  // Update token info at the start of each agent run
+  updateTokenInfo();
+
   // If we already have an assistant bubble streaming, finalize it first
   if (assistantEl) {
     removeStreamingDots(assistantEl);
@@ -500,6 +504,9 @@ function onAgentEnd(data) {
   toolBlocks.clear();
   activeToolCallId = null;
   pendingToolCalls.clear();
+
+  // Refresh token usage after agent completes
+  updateTokenInfo();
 }
 
 // ── Message update (streaming text / thinking) ────────────────────────
@@ -992,6 +999,7 @@ document.addEventListener("DOMContentLoaded", () => {
     toolBlocks.clear();
     activeToolCallId = null;
     pendingToolCalls.clear();
+    updateTokenInfo();
   });
 
   // ── Session select ──
@@ -1012,18 +1020,75 @@ document.addEventListener("DOMContentLoaded", () => {
     pendingToolCalls.clear();
     console.log("[session] loading history...");
     await loadMessageHistory();
+    updateTokenInfo();
   });
 
   // Load sessions on startup
   loadSessions();
 
-  // Load message history for the current session
+  // Load message history and token info for the current session
   // Small delay ensures SSE is connected and Pi agent is ready to respond
-  setTimeout(() => { loadMessageHistory(); }, 500);
+  setTimeout(() => {
+    loadMessageHistory();
+    updateTokenInfo();
+  }, 500);
 
   // ── Scroll on load ──
   scrollBottom();
 });
+
+// ── Token info display ────────────────────────────────────────────────
+
+let lastTokenRefresh = 0;
+const TOKEN_REFRESH_INTERVAL = 3000; // ms between refreshes during streaming
+
+/** Format token count with K/M suffix. */
+function fmtTokens(n) {
+  if (n == null) return "—";
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
+  return String(n);
+}
+
+/** Fetch session stats and update the token info display in the header. */
+async function updateTokenInfo() {
+  const now = Date.now();
+  if (now - lastTokenRefresh < TOKEN_REFRESH_INTERVAL) return;
+  lastTokenRefresh = now;
+
+  try {
+    const result = await client.getSessionStats();
+    if (!result) return;
+
+    // Support nested data shapes from Pi RPC
+    const data = result?.data || result;
+    const tokens = data.tokens || {};
+    const ctx = data.contextUsage || {};
+
+    const el = $("#token-info");
+    el.classList.remove("hidden");
+
+    // Build segments: IN / OUT + context usage bar
+    let html = `<span class="token-segment">IN: ${fmtTokens(tokens.input)}</span>`;
+    html += `<span class="token-segment">OUT: ${fmtTokens(tokens.output)}</span>`;
+
+    if (ctx.contextWindow != null) {
+      const pct = ctx.percent != null ? Math.round(ctx.percent) : 0;
+      const total = fmtTokens(ctx.contextWindow);
+      let barColor = "var(--success)";
+      if (pct >= 85) barColor = "var(--danger)";
+      else if (pct >= 70) barColor = "#cc963a"; // amber
+
+      html += `<span class="token-segment">${pct}%/${total}
+        <span class="token-bar"><span class="token-bar-fill" style="width:${pct}%;background:${barColor}"></span></span>
+      </span>`;
+    }
+
+    el.innerHTML = html;
+  } catch (err) {
+    console.warn("Failed to fetch session stats:", err);
+  }
+}
 
 // ── Session loading ───────────────────────────────────────────────────
 

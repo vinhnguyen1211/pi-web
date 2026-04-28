@@ -80,6 +80,39 @@ button:active { transform: scale(0.97); }
 
 #btn-theme-toggle { font-size: 1rem; padding: 4px 8px; min-width: 32px; }
 
+/* ===== Token info display ===== */
+.token-info {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--bg-input);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.token-info .token-segment { margin-right: 6px; }
+.token-info .token-segment:last-child { margin-right: 0; }
+
+.token-bar {
+  display: inline-block;
+  width: 40px;
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  vertical-align: middle;
+  margin-left: 2px;
+}
+
+.token-bar-fill {
+  height: 100%;
+  background: var(--success);
+  transition: width 0.3s ease, background 0.3s ease;
+  border-radius: 4px;
+}
+
 /* ===== Chat Container ===== */
 body {
   display: flex;
