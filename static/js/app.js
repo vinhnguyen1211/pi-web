@@ -176,6 +176,37 @@ function extractTextFromContent(content) {
   return JSON.stringify(content, null, 2);
 }
 
+/** Build a display title like "Bash: grep" or "Read: index.html" from tool name and args. */
+function getToolDisplayTitle(toolName, argsStr) {
+  let detail = "";
+  try {
+    if (toolName === "bash") {
+      // Extract the command: could be a raw string or JSON { command: "..." }
+      const parsed = typeof argsStr === "string" ? (() => { try { return JSON.parse(argsStr); } catch { return null; } })() : null;
+      if (parsed && typeof parsed.command === "string") {
+        // First word of the command
+        detail = parsed.command.trim().split(/\s+/)[0].split("/").pop();
+      } else if (typeof argsStr === "string" && argsStr.trim()) {
+        detail = argsStr.trim().split(/\s+/)[0].split("/").pop();
+      }
+    } else if (toolName === "read" || toolName === "edit") {
+      const parsed = typeof argsStr === "string" ? (() => { try { return JSON.parse(argsStr); } catch { return null; } })() : null;
+      if (parsed && typeof parsed.path === "string") {
+        detail = parsed.path.split("/").pop();
+      } else if (typeof argsStr === "string" && argsStr.trim()) {
+        detail = argsStr.trim().split(/\s+/)[0].split("/").pop();
+      }
+    } else if (toolName === "write") {
+      const parsed = typeof argsStr === "string" ? (() => { try { return JSON.parse(argsStr); } catch { return null; } })() : null;
+      if (parsed && typeof parsed.path === "string") {
+        detail = parsed.path.split("/").pop();
+      }
+    }
+  } catch {}
+  const label = toolName.charAt(0).toUpperCase() + toolName.slice(1);
+  return detail ? `${label}: ${detail}` : label;
+}
+
 /** Create a closed tool block DOM element (for history or toolcall_end without execution). */
 function buildToolBlock(toolName, argsStr, outputText, status, open) {
   const block = document.createElement("div");
@@ -200,7 +231,7 @@ function buildToolBlock(toolName, argsStr, outputText, status, open) {
   block.innerHTML = `
     <div class="tool-header">
       <span class="tool-arrow">▶</span>
-      <span class="tool-name">🔧 ${escapeHtml(toolName)}</span>
+      <span class="tool-name">🔧 ${escapeHtml(getToolDisplayTitle(toolName, argsStr || ""))}</span>
       ${statusHtml}
     </div>
     <div class="tool-body">
@@ -575,12 +606,10 @@ function onToolExecutionStart(evt) {
 
   // If a placeholder already exists from toolcall_end, replace it
   if (toolBlocks.has(toolCallId)) {
-    const existing = toolBlocks.get(toolCallId);
-    existing.block.classList.add("open");
-    return; // Already rendered, just open it
+    return; // Already rendered, keep collapsed
   }
 
-  const block = buildToolBlock(toolName, argsStr, undefined, "running", true);
+  const block = buildToolBlock(toolName, argsStr, undefined, "running", false);
   assistantEl.appendChild(block);
 
   toolBlocks.set(toolCallId, {
