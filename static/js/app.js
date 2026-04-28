@@ -17,21 +17,32 @@ class PiClient {
   connect() {
     if (this.eventSource) this.eventSource.close();
     this.eventSource = new EventSource("/stream");
-    this.eventSource.onmessage = (e) => this.handleEvent(JSON.parse(e.data));
+    this.eventSource.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        this.handleEvent(data);
+      } catch (err) {
+        // Skip non-JSON lines from the agent (status messages, etc.)
+        console.warn("SSE: non-JSON line:", e.data?.slice(0, 80));
+      }
+    };
     this.eventSource.onerror = () => console.warn("SSE lost — reconnecting…");
   }
 
   handleEvent(data) {
-    if (!data) return;
+    if (!data || typeof data !== "object") return;
     // Handle SSE comment-only heartbeat
     if (data.type === undefined && data.event === "agent_exited") return;
 
-    // Command responses (have matching id)
-    if (data.type === "response") {
+    // Command responses — match by id, or by known response types
+    if (data.type === "response" || data.id) {
       const resolver = this.pendingResolvers.get(data.id);
       if (resolver) {
+        console.log(`[cmd] got response: type=${data.type} id=${data.id}`);
         resolver(data);
         this.pendingResolvers.delete(data.id);
+      } else if (data.id) {
+        console.warn("[cmd] unmatched response id=", data.id, "type=", data.type);
       }
       return;
     }
@@ -93,12 +104,14 @@ class PiClient {
 
   async sendAwait(type, extra = {}) {
     const id = crypto.randomUUID();
+    console.log(`[cmd] sending: ${type} id=${id}`);
     await this.send({ type, id, ...extra });
     return new Promise((resolve) => {
       this.pendingResolvers.set(id, resolve);
       setTimeout(() => {
         if (this.pendingResolvers.has(id)) {
           this.pendingResolvers.delete(id);
+          console.warn(`[cmd] TIMEOUT: ${type} id=${id}`);
           resolve(null);
         }
       }, 15000);
@@ -179,9 +192,10 @@ function buildToolBlock(toolName, argsStr, outputText, status, open) {
     statusHtml = '';
   }
 
+  // Always create output placeholder — tool results may arrive in a separate message (toolResult role)
   const outputContent = outputText !== undefined && outputText !== null
     ? `<div class="tool-label" style="margin-top:6px;">Output:</div><pre class="tool-output">${escapeHtml(outputText)}</pre>`
-    : '';
+    : `<div class="tool-label" style="margin-top:6px;">Output:</div><pre class="tool-output"></pre>`;
 
   block.innerHTML = `
     <div class="tool-header">
@@ -236,16 +250,54 @@ function createMessage(role, content) {
 
 // ── Message History ───────────────────────────────────────────────────
 
+/** Find the last EMPTY tool output <pre> in the last assistant bubble (tool results come as separate messages). */
+function findLastToolOutputEl() {
+  const bubbles = $$("#messages .message.assistant .bubble");
+  for (let i = bubbles.length - 1; i >= 0; i--) {
+    const outputs = bubbles[i].querySelectorAll(".tool-output");
+    for (let j = outputs.length - 1; j >= 0; j--) {
+      if (!outputs[j].textContent.trim()) return outputs[j]; // empty → fillable
+    }
+  }
+  console.warn("[history] no empty tool-output found to fill");
+  return null;
+}
+
 async function loadMessageHistory() {
   try {
     const result = await client.getMessages();
-    const messages = result?.messages || result?.items || [];
+    console.log("[history] getMessages result:", JSON.stringify(result).slice(0, 300));
+    // Support multiple response shapes from Pi RPC
+    let messages = result?.messages || result?.items || result?.data?.messages || [];
+    if (!Array.isArray(messages) && Array.isArray(result)) {
+      messages = result;  // result itself is the array
+    }
+    console.log("[history] messages count:", messages.length);
     if (!messages.length) return;
 
     $("#messages").innerHTML = "";
 
-    for (const msg of messages) {
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
       const role = msg.role || msg.type || "assistant";
+      console.log(`[history][${i}] role="${role}" content=`, Array.isArray(msg.content) ? `array[${msg.content.length}]` : typeof msg.content, msg.content?.slice(0, 80));
+
+      // Tool result messages — inject into the preceding tool call block
+      // Pi uses role "toolResult" (camelCase)
+      if (role === "toolResult" || role === "tool") {
+        const outputText = typeof msg.content === "string"
+          ? msg.content
+          : extractTextFromContent(msg.content);
+        if (outputText) {
+          const el = findLastToolOutputEl();
+          if (el) {
+            el.textContent = outputText;
+          } else {
+            console.warn("[history] tool result with no preceding tool block:", msg);
+          }
+        }
+        continue;  // Don't render as a separate message
+      }
 
       // Handle array content (can mix text + toolCall blocks)
       if (Array.isArray(msg.content)) {
@@ -864,9 +916,19 @@ document.addEventListener("DOMContentLoaded", () => {
   sessionSelect.addEventListener("change", async () => {
     const path = sessionSelect.value;
     if (!path) return;
+    console.log("[session] switching to:", path);
     await client.switchSession(path);
+    // Brief pause to ensure the agent has fully switched sessions
+    await new Promise((r) => setTimeout(r, 500));
     $("#messages").innerHTML = "";
     addSystemMessage(`Switched to session: ${sessionSelect.selectedOptions[0].text}`);
+    // Clear any stale streaming state from previous session
+    assistantEl = null;
+    thinkingEl = null;
+    toolBlocks.clear();
+    activeToolCallId = null;
+    pendingToolCalls.clear();
+    console.log("[session] loading history...");
     await loadMessageHistory();
   });
 
@@ -874,7 +936,8 @@ document.addEventListener("DOMContentLoaded", () => {
   loadSessions();
 
   // Load message history for the current session
-  loadMessageHistory();
+  // Small delay ensures SSE is connected and Pi agent is ready to respond
+  setTimeout(() => { loadMessageHistory(); }, 500);
 
   // ── Scroll on load ──
   scrollBottom();
