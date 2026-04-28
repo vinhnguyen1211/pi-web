@@ -223,15 +223,17 @@ body {
   font-family: var(--font-mono);
   font-size: 0.78rem;
   line-height: 1.6;
-  overflow-x: auto;
+  width: 100%;
+  max-width: 100%;
   border-radius: 6px;
   border: 1px solid var(--border);
   margin-top: 4px;
 }
 
 .diff-column {
-  flex: 1;
+  flex: 1 1 50%;
   min-width: 0;
+  max-width: 50%;
   overflow-x: auto;
 }
 
@@ -306,8 +308,9 @@ body {
 .diff-line-content {
   padding-left: 6px;
   white-space: pre;
-  overflow: hidden;
-  flex: 1;
+  overflow-x: auto;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .diff-separator {
