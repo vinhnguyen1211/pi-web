@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"bytes"
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 
@@ -16,12 +18,13 @@ import (
 
 // Router wires up all HTTP routes for the Pi web client.
 type Router struct {
-	agent *agent.Agent
+	agent    *agent.Agent
+	staticFS embed.FS
 }
 
-// New creates a new Router with the given agent.
-func New(a *agent.Agent) *Router {
-	return &Router{agent: a}
+// New creates a new Router with the given agent and embedded static filesystem.
+func New(a *agent.Agent, staticFS embed.FS) *Router {
+	return &Router{agent: a, staticFS: staticFS}
 }
 
 // ServeMux returns an http.Handler serving all routes.
@@ -34,10 +37,10 @@ func (r *Router) ServeMux() http.Handler {
 	// Send a command to the Pi agent
 	mux.HandleFunc("POST /api/command", r.handleCommand)
 
-	// List resusable sessions
+	// List reusable sessions
 	mux.HandleFunc("GET /api/sessions", r.handleSessions)
 
-	// Static files: root serves index.html, everything else maps to ./static/
+	// Static files: root serves index.html, everything else maps to embedded static/
 	mux.HandleFunc("GET /{path...}", r.handleStatic)
 
 	return mux
@@ -128,7 +131,7 @@ func (r *Router) handleSessions(w http.ResponseWriter, req *http.Request) {
 	json.NewEncoder(w).Encode(sessions)
 }
 
-// handleStatic serves static files from ./static/ directory.
+// handleStatic serves static files from the embedded filesystem.
 // Root path / serves index.html directly. No redirects — avoids loops.
 func (r *Router) handleStatic(w http.ResponseWriter, req *http.Request) {
 	path := strings.TrimPrefix(req.URL.Path, "/")
@@ -136,20 +139,30 @@ func (r *Router) handleStatic(w http.ResponseWriter, req *http.Request) {
 		path = "index.html"
 	}
 
-	fsPath := filepath.Join("static", path)
+	sub, err := fs.Sub(r.staticFS, "static")
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
 
-	info, err := os.Stat(fsPath)
+	info, err := fs.Stat(sub, path)
 	if err != nil || info.IsDir() {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 
-	f, err := os.Open(fsPath)
+	f, err := sub.Open(path)
 	if err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
 	defer f.Close()
 
-	http.ServeContent(w, req, info.Name(), info.ModTime(), f)
+	data, err := io.ReadAll(f)
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+
+	http.ServeContent(w, req, info.Name(), info.ModTime(), bytes.NewReader(data))
 }

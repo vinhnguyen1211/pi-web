@@ -1,0 +1,5 @@
+# Built binary
+piweb
+
+# Generated embedded static (recreated by `go run copy_static.go`)
+cmd/server/static/

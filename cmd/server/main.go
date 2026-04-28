@@ -40,7 +40,7 @@ func main() {
 
 	log.Printf("Pi agent started (PID %d)", a.PID())
 
-	r := handler.New(a)
+	r := handler.New(a, staticFS)
 
 	srv := &http.Server{
 		Addr:    *addr,
