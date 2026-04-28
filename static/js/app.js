@@ -476,11 +476,7 @@ function buildToolBlock(toolName, argsStr, outputText, status, open) {
     }
 
     if (diffHtmls.length > 0) {
-      bodyContent = `
-        ${diffHtmls.join("")}
-        <div class="tool-label" style="margin-top:8px;">Result:</div>
-        <pre class="tool-output">${outputText !== undefined && outputText !== null ? escapeHtml(outputText) : ""}</pre>
-      `;
+      bodyContent = diffHtmls.join("");
     } else {
       // Fallback to default rendering
       console.log(`[edit-tool] fallback for ${toolName}: parsed=`, parsed, "argsStr preview:", argsStr?.slice(0, 120));
@@ -696,6 +692,12 @@ function dispatchToUI(data) {
 // ── Agent lifecycle ───────────────────────────────────────────────────
 
 function onAgentStart(data) {
+  // Cancel any pending refresh from the previous turn
+  if (tokenUpdateTimer) {
+    clearTimeout(tokenUpdateTimer);
+    tokenUpdateTimer = null;
+  }
+
   // Update token info at the start of each agent run
   updateTokenInfo();
 
@@ -734,8 +736,9 @@ function onAgentEnd(data) {
   activeToolCallId = null;
   pendingToolCalls.clear();
 
-  // Refresh token usage after agent completes
-  updateTokenInfo();
+  // Schedule a delayed refresh — Pi needs time to finalize token counters after agent_end.
+  // Immediate queries can return all-zeros, causing the header display to flash to 0.
+  scheduleTokenRefresh();
 }
 
 // ── Message update (streaming text / thinking) ────────────────────────
@@ -1259,6 +1262,8 @@ function clearChatState() {
 
 let lastTokenRefresh = 0;
 const TOKEN_REFRESH_INTERVAL = 3000; // ms between refreshes during streaming
+let tokenUpdateTimer = null;        // Debounce timer for post-agent-end updates
+let cachedTokens = { input: null, output: null, contextWindow: null, percent: null };
 
 /** Format token count with K/M suffix. */
 function fmtTokens(n) {
@@ -1266,6 +1271,38 @@ function fmtTokens(n) {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
   if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
   return String(n);
+}
+
+/** Check whether the fetched stats are clearly invalid (all zeros where we expect real values). */
+function isTokenStatsStale(tokens, ctx) {
+  const inputIsZero = tokens.input === 0 && cachedTokens.input != null;
+  const outputIsZero = tokens.output === 0 && cachedTokens.output != null;
+  const ctxIsMissing = (ctx.contextWindow == null) && cachedTokens.contextWindow != null;
+  return (inputIsZero || outputIsZero || ctxIsMissing);
+}
+
+/** Render the token info HTML and set it on the header element. */
+function renderTokenInfo(tokens, ctx) {
+  const el = $("#token-info");
+  el.classList.remove("hidden");
+
+  // Build segments: IN / OUT + context usage bar
+  let html = `<span class="token-segment">IN: ${fmtTokens(tokens.input)}</span>`;
+  html += `<span class="token-segment">OUT: ${fmtTokens(tokens.output)}</span>`;
+
+  if (ctx.contextWindow != null) {
+    const pct = ctx.percent != null ? Math.round(ctx.percent) : 0;
+    const total = fmtTokens(ctx.contextWindow);
+    let barColor = "var(--success)";
+    if (pct >= 85) barColor = "var(--danger)";
+    else if (pct >= 70) barColor = "#cc963a"; // amber
+
+    html += `<span class="token-segment">${pct}%/${total}
+      <span class="token-bar"><span class="token-bar-fill" style="width:${pct}%;background:${barColor}"></span></span>
+    </span>`;
+  }
+
+  el.innerHTML = html;
 }
 
 /** Fetch session stats and update the token info display in the header. */
@@ -1283,29 +1320,78 @@ async function updateTokenInfo() {
     const tokens = data.tokens || {};
     const ctx = data.contextUsage || {};
 
-    const el = $("#token-info");
-    el.classList.remove("hidden");
-
-    // Build segments: IN / OUT + context usage bar
-    let html = `<span class="token-segment">IN: ${fmtTokens(tokens.input)}</span>`;
-    html += `<span class="token-segment">OUT: ${fmtTokens(tokens.output)}</span>`;
-
-    if (ctx.contextWindow != null) {
-      const pct = ctx.percent != null ? Math.round(ctx.percent) : 0;
-      const total = fmtTokens(ctx.contextWindow);
-      let barColor = "var(--success)";
-      if (pct >= 85) barColor = "var(--danger)";
-      else if (pct >= 70) barColor = "#cc963a"; // amber
-
-      html += `<span class="token-segment">${pct}%/${total}
-        <span class="token-bar"><span class="token-bar-fill" style="width:${pct}%;background:${barColor}"></span></span>
-      </span>`;
+    // Guard against stale zero-values: if we have real cached values and the new
+    // query returns all zeros, skip this update. This happens when updateTokenInfo()
+    // fires right after agent_end before Pi has finalized its token counters.
+    if (isTokenStatsStale(tokens, ctx)) {
+      console.log("[token] stats appear stale (all zeros), skipping update");
+      return;
     }
 
-    el.innerHTML = html;
+    // Cache valid values so future stale checks work correctly
+    cachedTokens.input = tokens.input ?? cachedTokens.input;
+    cachedTokens.output = tokens.output ?? cachedTokens.output;
+    cachedTokens.contextWindow = ctx.contextWindow ?? cachedTokens.contextWindow;
+    cachedTokens.percent = ctx.percent ?? cachedTokens.percent;
+
+    renderTokenInfo(tokens, ctx);
   } catch (err) {
     console.warn("Failed to fetch session stats:", err);
   }
+}
+
+/** Schedule a delayed token refresh after agent turns.
+ *  Pi needs ~800ms after agent_end to finalize token counters internally.
+ *  If the first poll still returns zeros, retry once after another delay. */
+function scheduleTokenRefresh() {
+  // Cancel any pending refresh
+  if (tokenUpdateTimer) {
+    clearTimeout(tokenUpdateTimer);
+  }
+
+  let retries = 0;
+  const MAX_RETRIES = 3;
+  const BASE_DELAY = 800; // ms — enough time for Pi to finalize stats
+
+  function poll() {
+    try {
+      client.getSessionStats().then((result) => {
+        if (!result) return;
+        const data = result?.data || result;
+        const tokens = data.tokens || {};
+        const ctx = data.contextUsage || {};
+
+        // If stats look valid (not all zeros when we expect real values), use them
+        if (!isTokenStatsStale(tokens, ctx) || (tokens.input == null && tokens.output == null)) {
+          cachedTokens.input = tokens.input ?? cachedTokens.input;
+          cachedTokens.output = tokens.output ?? cachedTokens.output;
+          cachedTokens.contextWindow = ctx.contextWindow ?? cachedTokens.contextWindow;
+          cachedTokens.percent = ctx.percent ?? cachedTokens.percent;
+          renderTokenInfo(tokens, ctx);
+          tokenUpdateTimer = null;
+          return;
+        }
+
+        // Stats are stale — retry once more
+        retries++;
+        if (retries < MAX_RETRIES) {
+          tokenUpdateTimer = setTimeout(poll, BASE_DELAY * retries);
+        } else {
+          console.log("[token] stats still stale after retries, giving up");
+          tokenUpdateTimer = null;
+        }
+      }).catch((err) => {
+        console.warn("[token] refresh poll failed:", err);
+        tokenUpdateTimer = null;
+      });
+    } catch (err) {
+      console.warn("[token] refresh error:", err);
+      tokenUpdateTimer = null;
+    }
+  }
+
+  // Initial delay before first poll
+  tokenUpdateTimer = setTimeout(poll, BASE_DELAY);
 }
 
 // ── Session loading ───────────────────────────────────────────────────

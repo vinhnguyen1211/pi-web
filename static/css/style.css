@@ -107,6 +107,7 @@ button:active { transform: scale(0.97); }
 }
 
 .token-bar-fill {
+  display: block;
   height: 100%;
   background: var(--success);
   transition: width 0.3s ease, background 0.3s ease;
