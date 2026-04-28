@@ -332,6 +332,7 @@ body {
   overflow: hidden;
   background: var(--tool-bg);
   white-space: normal;
+  width: 100%;
 }
 
 .tool-header {
@@ -354,6 +355,7 @@ body {
 .tool-body {
   display: none;
   padding: 6px 10px 8px;
+  width: 100%;
 }
 
 .tool-block.open .tool-body { display: block; }
@@ -639,6 +641,10 @@ dialog#extension-modal::backdrop { background: rgba(0, 0, 0, 0.5); }
   flex: 1;
   height: 1px;
   background: var(--border);
+}
+
+#session-list-container {
+  width: 100%;
 }
 
 #session-list {
