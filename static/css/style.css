@@ -129,7 +129,7 @@ body {
   display: block;
   padding: 10px 14px;
   border-radius: var(--radius);
-  white-space: pre-wrap;
+  white-space: normal;
   word-break: break-word;
   min-height: 1.5em;
 }
