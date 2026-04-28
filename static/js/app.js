@@ -266,10 +266,117 @@ function getToolDisplayTitle(toolName, argsStr) {
   return detail ? `${label}: ${detail}` : label;
 }
 
+/** Try to parse a JSON string; return null on failure. */
+function tryParseJSON(str) {
+  if (!str) return null;
+  try { return JSON.parse(str); } catch { return null;
+ }
+}
+
+/** Compute a side-by-side diff and return HTML for the two-column view. */
+function buildDiffHtml(oldText, newText) {
+  // Use the global Diff object (loaded from CDN)
+  if (typeof Diff === "undefined") {
+    // Fallback: just show old/new as plain text
+    return `<div class="tool-label">Old:</div><pre class="tool-output">${escapeHtml(oldText)}</pre>
+            <div class="tool-label" style="margin-top:6px;">New:</div><pre class="tool-output">${escapeHtml(newText)}</pre>`;
+  }
+
+  const diff = Diff.diffLines(oldText, newText);
+  if (!diff || diff.length === 0) {
+    return '<div class="tool-label" style="color:var(--text-muted)">No changes</div>';
+  }
+
+  // Build paired rows for side-by-side alignment
+  const rows = [];
+  let oldLineNum = 1;
+  let newLineNum = 1;
+
+  for (let i = 0; i < diff.length; i++) {
+    const part = diff[i];
+    const lines = part.value.split("\n");
+    // Remove trailing empty element from final newline split
+    if (lines[lines.length - 1] === "") lines.pop();
+
+    if (part.removed) {
+      // Lines being removed — show in old column, blank in new
+      for (const line of lines) {
+        rows.push({
+          oldNum: oldLineNum++,
+          oldPrefix: "-",
+          oldContent: line,
+          oldClass: "removed",
+          newNum: null,
+          newPrefix: " ",
+          newContent: "",
+          newClass: "blank",
+        });
+      }
+    } else if (part.added) {
+      // Lines being added — blank in old, show in new
+      for (const line of lines) {
+        rows.push({
+          oldNum: null,
+          oldPrefix: " ",
+          oldContent: "",
+          oldClass: "blank",
+          newNum: newLineNum++,
+          newPrefix: "+",
+          newContent: line,
+          newClass: "added",
+        });
+      }
+    } else {
+      // Context lines — show in both
+      for (const line of lines) {
+        rows.push({
+          oldNum: oldLineNum++,
+          oldPrefix: " ",
+          oldContent: line,
+          oldClass: "context",
+          newNum: newLineNum++,
+          newPrefix: " ",
+          newContent: line,
+          newClass: "context",
+        });
+      }
+    }
+  }
+
+  // Build HTML table-like structure with flexbox
+  let html = '<div class="diff-container">';
+
+  // Header row
+  html += '<div class="diff-row" style="display:flex;">';
+  html += '<div class="diff-column"><div class="diff-header-cell">Original</div>';
+  const oldRowsHtml = rows.map(r => {
+    const num = r.oldNum != null ? escapeHtml(String(r.oldNum)) : "";
+    return `<div class="diff-line ${r.oldClass}"><span class="diff-line-num">${num}</span><span class="diff-line-prefix">${r.oldPrefix}</span><span class="diff-line-content">${escapeHtml(r.oldContent)}</span></div>`;
+  }).join("");
+  html += oldRowsHtml + '</div>';
+
+  // Separator (thin line between columns)
+  html += '<div class="diff-separator"></div>';
+
+  // New column
+  html += '<div class="diff-column"><div class="diff-header-cell">Modified</div>';
+  const newRowsHtml = rows.map(r => {
+    const num = r.newNum != null ? escapeHtml(String(r.newNum)) : "";
+    return `<div class="diff-line ${r.newClass}"><span class="diff-line-num">${num}</span><span class="diff-line-prefix">${r.newPrefix}</span><span class="diff-line-content">${escapeHtml(r.newContent)}</span></div>`;
+  }).join("");
+  html += newRowsHtml + '</div>';
+
+  html += '</div></div>';
+  return html;
+}
+
 /** Create a closed tool block DOM element (for history or toolcall_end without execution). */
 function buildToolBlock(toolName, argsStr, outputText, status, open) {
   const block = document.createElement("div");
-  block.className = `tool-block${open ? " open" : ""}`;
+  const isEditTool = toolName.toLowerCase() === "edit";
+  // Edit tool blocks are always expanded by default
+  const isOpen = open || isEditTool;
+  block.className = `tool-block${isOpen ? " open" : ""}`;
 
   let statusHtml;
   if (status === "running") {
@@ -282,10 +389,50 @@ function buildToolBlock(toolName, argsStr, outputText, status, open) {
     statusHtml = '';
   }
 
-  // Always create output placeholder — tool results may arrive in a separate message (toolResult role)
-  const outputContent = outputText !== undefined && outputText !== null
-    ? `<div class="tool-label" style="margin-top:6px;">Output:</div><pre class="tool-output">${escapeHtml(outputText)}</pre>`
-    : `<div class="tool-label" style="margin-top:6px;">Output:</div><pre class="tool-output"></pre>`;
+  // ── Special rendering for the Edit tool: show a git diff UI ──
+  let bodyContent;
+  if (isEditTool) {
+    const parsed = tryParseJSON(argsStr);
+    // Support two arg shapes:
+    //   A) { edits: [{ oldText, newText }, ...] } — Pi's multi-edit format
+    //   B) { oldText, newText } — single flat format
+    let diffHtmls = [];
+    if (parsed && Array.isArray(parsed.edits) && parsed.edits.length > 0) {
+      for (const edit of parsed.edits) {
+        if (edit.oldText !== undefined && edit.newText !== undefined) {
+          const label = parsed.path ? `path="${escapeHtml(parsed.path)}"` : "";
+          diffHtmls.push(`<div class="tool-label">Edit ${label}</div>${buildDiffHtml(edit.oldText, edit.newText)}`);
+        }
+      }
+    } else if (parsed && parsed.oldText !== undefined && parsed.newText !== undefined) {
+      diffHtmls.push(buildDiffHtml(parsed.oldText, parsed.newText));
+    }
+
+    if (diffHtmls.length > 0) {
+      bodyContent = `
+        ${diffHtmls.join("")}
+        <div class="tool-label" style="margin-top:8px;">Result:</div>
+        <pre class="tool-output">${outputText !== undefined && outputText !== null ? escapeHtml(outputText) : ""}</pre>
+      `;
+    } else {
+      // Fallback to default rendering
+      console.log(`[edit-tool] fallback for ${toolName}: parsed=`, parsed, "argsStr preview:", argsStr?.slice(0, 120));
+      bodyContent = `
+        <div class="tool-label">Args:</div>
+        <pre class="tool-args">${escapeHtml(argsStr || "")}</pre>
+        <div class="tool-label" style="margin-top:6px;">Output:</div>
+        <pre class="tool-output">${outputText !== undefined && outputText !== null ? escapeHtml(outputText) : ""}</pre>
+      `;
+    }
+  } else {
+    // Default rendering for non-edit tools
+    bodyContent = `
+      <div class="tool-label">Args:</div>
+      <pre class="tool-args">${escapeHtml(argsStr || "")}</pre>
+      <div class="tool-label" style="margin-top:6px;">Output:</div>
+      <pre class="tool-output">${outputText !== undefined && outputText !== null ? escapeHtml(outputText) : ""}</pre>
+    `;
+  }
 
   block.innerHTML = `
     <div class="tool-header">
@@ -294,9 +441,7 @@ function buildToolBlock(toolName, argsStr, outputText, status, open) {
       ${statusHtml}
     </div>
     <div class="tool-body">
-      <div class="tool-label">Args:</div>
-      <pre class="tool-args">${escapeHtml(argsStr || "")}</pre>
-      ${outputContent}
+      ${bodyContent}
     </div>
   `;
 
