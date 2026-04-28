@@ -9,45 +9,29 @@ import (
 	"os/signal"
 	"syscall"
 
-	"piweb/internal/agent"
 	"piweb/internal/handler"
+	"piweb/internal/manager"
 )
 
 func main() {
 	cwd := flag.String("cwd", "", "Working directory (default: $PWD)")
-	sessionID := flag.String("session", "", "Session file or ID to resume")
 	addr := flag.String("addr", ":9000", "HTTP listen address")
-	noTools := flag.Bool("no-tools", false, "Disable all built-in tools")
 	flag.Parse()
 
 	if *cwd == "" {
 		*cwd, _ = os.Getwd()
 	}
 
-	// Build agent args
-	args := []string{"--mode", "rpc"}
-	if *sessionID != "" {
-		args = append(args, "--session", *sessionID)
-	}
-	if *noTools {
-		args = append(args, "--no-tools")
-	}
+	mgr := manager.New(*cwd)
 
-	a, err := agent.New(*cwd, args...)
-	if err != nil {
-		log.Fatalf("Failed to start Pi agent: %v", err)
-	}
-
-	log.Printf("Pi agent started (PID %d)", a.PID())
-
-	r := handler.New(a, staticFS)
+	r := handler.New(mgr, staticFS)
 
 	srv := &http.Server{
 		Addr:    *addr,
 		Handler: r.ServeMux(),
 	}
 
-	// Graceful shutdown: when SIGINT/SIGTERM received, kill the agent
+	// Graceful shutdown: when SIGINT/SIGTERM received, kill all agents
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -64,9 +48,7 @@ func main() {
 
 	stop() // stop listening for more signals
 
-	if err := a.Kill(); err != nil {
-		log.Printf("Error killing agent: %v", err)
-	}
+	mgr.Cleanup()
 
 	log.Println("Bye!")
 }

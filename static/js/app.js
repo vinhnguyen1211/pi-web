@@ -3,6 +3,10 @@
    Handles SSE events, commands, and DOM rendering.
    ===================================================================== */
 
+// ── Connection ID (unique per tab) ────────────────────────────────────
+
+const CONN_ID = crypto.randomUUID();
+
 // ── PiClient ──────────────────────────────────────────────────────────
 
 class PiClient {
@@ -11,12 +15,12 @@ class PiClient {
     this.currentText = "";
     this.eventSource = null;
     this.pendingResolvers = new Map(); // id -> resolve fn
-    this.connect();
+    this.connected = false;
   }
 
-  connect() {
+  connect(connId) {
     if (this.eventSource) this.eventSource.close();
-    this.eventSource = new EventSource("/stream");
+    this.eventSource = new EventSource(`/stream?connId=${encodeURIComponent(connId)}`);
     this.eventSource.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
@@ -34,6 +38,13 @@ class PiClient {
     // Handle SSE comment-only heartbeat
     if (data.type === undefined && data.event === "agent_exited") return;
 
+    // Awaiting session — no agent yet, client should pick one
+    if (data.type === "awaiting_session") {
+      console.log("[sse] awaiting_session — showing selection screen");
+      showSessionScreen();
+      return;
+    }
+
     // Command responses — match by id, or by known response types
     if (data.type === "response" || data.id) {
       const resolver = this.pendingResolvers.get(data.id);
@@ -49,6 +60,41 @@ class PiClient {
 
     // Forward to UI handlers
     dispatchToUI(data);
+  }
+
+  // ── Connect / Disconnect ──
+
+  /** Spawn a new agent: either fresh or resume from session path. */
+  async connectAgent(sessionPath) {
+    const body = sessionPath
+      ? { type: "resume", sessionPath }
+      : { type: "new" };
+
+    const resp = await fetch("/api/connect", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Conn-Id": CONN_ID,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) throw new Error(`Connect failed: ${resp.status}`);
+    const result = await resp.json();
+    console.log("[connect] agent spawned:", result);
+
+    // Now connect SSE with the connId
+    this.connected = true;
+    this.connect(CONN_ID);
+  }
+
+  /** Disconnect and return to session selection screen. */
+  disconnect() {
+    if (this.eventSource) {
+      this.eventSource.close();
+      this.eventSource = null;
+    }
+    this.connected = false;
+    this.pendingResolvers.clear();
   }
 
   // ── Commands ──
@@ -96,7 +142,10 @@ class PiClient {
   async send(cmd) {
     const resp = await fetch("/api/command", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Conn-Id": CONN_ID,
+      },
       body: JSON.stringify(cmd),
     });
     if (!resp.ok) throw new Error(`Command failed: ${resp.status}`);
@@ -164,6 +213,24 @@ function renderMarkdown(text) {
     gfm: true,     // GitHub Flavored Markdown
   });
   return marked.parse(text);
+}
+
+// ── Screen management ─────────────────────────────────────────────────
+
+function showSessionScreen() {
+  $("#session-screen").style.display = "flex";
+  $("#header").classList.add("hidden");
+  $("#chat-container").classList.add("hidden");
+  $("#input-area").classList.add("hidden");
+  $("#queue-bar").classList.add("hidden");
+  $("#btn-abort").classList.add("hidden");
+}
+
+function showChatScreen() {
+  $("#session-screen").style.display = "none";
+  $("#header").classList.remove("hidden");
+  $("#chat-container").classList.remove("hidden");
+  $("#input-area").classList.remove("hidden");
 }
 
 // ── UI State ──────────────────────────────────────────────────────────
@@ -1105,8 +1172,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const sendBtn = $("#btn-send");
   const abortBtn = $("#btn-abort");
   const themeToggle = $("#btn-theme-toggle");
+  const disconnectBtn = $("#btn-disconnect");
   const newSessionBtn = $("#btn-new-session");
-  const sessionSelect = $("#session-select");
 
   // ── Send message ──
   async function sendMessage() {
@@ -1149,55 +1216,44 @@ document.addEventListener("DOMContentLoaded", () => {
     localStorage.setItem("piweb-theme", next);
   });
 
-  // ── New session ──
+  // ── Disconnect (return to session selection screen) ──
+  disconnectBtn.addEventListener("click", () => {
+    client.disconnect();
+    clearChatState();
+    showSessionScreen();
+    loadSessions();
+  });
+
+  // ── New session from selection screen ──
   newSessionBtn.addEventListener("click", async () => {
-    await client.newSession();
-    sessionSelect.value = "";
-    // Clear chat area for fresh start
+    await client.connectAgent(""); // empty = new session
+    showChatScreen();
     $("#messages").innerHTML = "";
     addSystemMessage("New session started");
-    assistantEl = null;
-    thinkingEl = null;
-    toolBlocks.clear();
-    activeToolCallId = null;
-    pendingToolCalls.clear();
-    updateTokenInfo();
+    clearChatState();
+
+    // Load message history and token info for the current session
+    setTimeout(() => {
+      loadMessageHistory();
+      updateTokenInfo();
+    }, 500);
   });
 
-  // ── Session select ──
-  sessionSelect.addEventListener("change", async () => {
-    const path = sessionSelect.value;
-    if (!path) return;
-    console.log("[session] switching to:", path);
-    await client.switchSession(path);
-    // Brief pause to ensure the agent has fully switched sessions
-    await new Promise((r) => setTimeout(r, 500));
-    $("#messages").innerHTML = "";
-    addSystemMessage(`Switched to session: ${sessionSelect.selectedOptions[0].text}`);
-    // Clear any stale streaming state from previous session
-    assistantEl = null;
-    thinkingEl = null;
-    toolBlocks.clear();
-    activeToolCallId = null;
-    pendingToolCalls.clear();
-    console.log("[session] loading history...");
-    await loadMessageHistory();
-    updateTokenInfo();
-  });
-
-  // Load sessions on startup
+  // ── Load sessions on startup ──
+  showSessionScreen();
   loadSessions();
-
-  // Load message history and token info for the current session
-  // Small delay ensures SSE is connected and Pi agent is ready to respond
-  setTimeout(() => {
-    loadMessageHistory();
-    updateTokenInfo();
-  }, 500);
 
   // ── Scroll on load ──
   scrollBottom();
 });
+
+function clearChatState() {
+  assistantEl = null;
+  thinkingEl = null;
+  toolBlocks.clear();
+  activeToolCallId = null;
+  pendingToolCalls.clear();
+}
 
 // ── Token info display ────────────────────────────────────────────────
 
@@ -1259,18 +1315,39 @@ async function loadSessions() {
     const resp = await fetch("/api/sessions");
     if (!resp.ok) return;
     const sessions = await resp.json();
-    const select = $("#session-select");
+    const container = $("#session-list");
+    const listContainer = $("#session-list-container");
+    container.innerHTML = "";
 
-    // Keep the first option (+ New Session), replace rest
-    select.innerHTML = '<option value="">+ New Session</option>';
+    if (!sessions || sessions.length === 0) {
+      listContainer.classList.add("hidden");
+      return;
+    }
+
+    listContainer.classList.remove("hidden");
 
     for (const s of sessions.slice(0, 50)) { // Limit to 50 most recent
-      const opt = document.createElement("option");
-      opt.value = s.path;
-      const age = timeSince(s.modTime);
-      opt.textContent = `${s.name} (${age})`;
-      opt.title = `${s.entries} entries, ${s.model || "unknown"}`;
-      select.appendChild(opt);
+      const item = document.createElement("div");
+      item.className = "session-item";
+      item.innerHTML = `
+        <span class="session-item-name">${escapeHtml(s.name)}</span>
+        <span class="session-item-meta">${timeSince(s.modTime)}</span>
+      `;
+      item.title = `${s.entries} entries, ${s.model || "unknown"}`;
+      item.addEventListener("click", async () => {
+        await client.connectAgent(s.path);
+        showChatScreen();
+        $("#messages").innerHTML = "";
+        addSystemMessage(`Connected to session: ${s.name}`);
+        clearChatState();
+
+        // Brief pause, then load history
+        setTimeout(async () => {
+          await loadMessageHistory();
+          updateTokenInfo();
+        }, 500);
+      });
+      container.appendChild(item);
     }
   } catch (err) {
     console.warn("Failed to load sessions:", err);

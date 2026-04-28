@@ -7,14 +7,30 @@
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <!-- Header bar -->
-  <header id="header">
+  <!-- Session selection screen (shown before connecting) -->
+  <div id="session-screen">
+    <div class="session-screen-inner">
+      <div class="session-logo">π Pi Web</div>
+      <p class="session-subtitle">Choose a session to connect or start a new one</p>
+
+      <button id="btn-new-session" class="btn-primary">
+        <span class="btn-icon">+</span> New Session
+      </button>
+
+      <div id="session-list-container" class="hidden">
+        <div class="session-divider">
+          <span>Existing Sessions</span>
+        </div>
+        <div id="session-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Header bar (shown when connected) -->
+  <header id="header" class="hidden">
     <div class="header-left">
       <span class="logo">π Pi Web</span>
-      <select id="session-select" title="Resume session">
-        <option value="">+ New Session</option>
-      </select>
-      <button id="btn-new-session" title="Start new session">New</button>
+      <button id="btn-disconnect" title="Disconnect and return to session list">Disconnect</button>
     </div>
     <div class="header-right">
       <span id="token-info" class="token-info hidden"></span>
@@ -22,8 +38,8 @@
     </div>
   </header>
 
-  <!-- Main chat area -->
-  <main id="chat-container">
+  <!-- Main chat area (shown when connected) -->
+  <main id="chat-container" class="hidden">
     <div id="messages"></div>
 
     <!-- Compaction overlay -->
@@ -46,8 +62,8 @@
   <!-- Abort button (visible while streaming) -->
   <button id="btn-abort" class="hidden" title="Abort current response">⏹ Abort</button>
 
-  <!-- Input area -->
-  <footer id="input-area">
+  <!-- Input area (shown when connected) -->
+  <footer id="input-area" class="hidden">
     <textarea
       id="prompt-input"
       placeholder="Send a message to Pi…"
