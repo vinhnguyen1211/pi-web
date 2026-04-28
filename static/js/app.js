@@ -154,11 +154,53 @@ function renderMarkdown(text) {
 let assistantEl = null;             // Current streaming message .bubble element
 let currentTextEl = null;           // Current text segment receiving deltas (null when in tool/thinking block)
 let thinkingEl = null;              // Current thinking content element
+let streamingDotsEl = null;         // Inline three-dot indicator inside the assistant bubble
 let toolBlocks = new Map();         // toolCallId -> { block, outputEl, statusEl, name, argsStr }
 let activeToolCallId = null;        // Currently streaming tool execution
 let pendingToolCalls = new Map();   // toolUseId -> { name, args } (from toolcall_start/end before execution)
 let queueItems = [];
 let pendingUIRequest = null;        // { id, method, resolve } for extension_ui_request
+
+// ── Streaming Dots Helper ─────────────────────────────────────────────
+
+function createStreamingDots() {
+  const el = document.createElement("span");
+  el.className = "streaming-dots";
+  el.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
+  return el;
+}
+
+function showStreamingDots(bubble) {
+  if (!bubble) return;
+  // Remove any existing dots first
+  removeStreamingDots(bubble);
+  streamingDotsEl = createStreamingDots();
+  appendAtEnd(bubble, streamingDotsEl);
+}
+
+/** Re-append the streaming dots so they stay at the bottom of the bubble after new content. */
+function moveStreamingDotsToEnd(bubble) {
+  if (!bubble || !streamingDotsEl) return;
+  appendAtEnd(bubble, streamingDotsEl);
+}
+
+/** Append el as the last child of parent (moves it if already inside). */
+function appendAtEnd(parent, el) {
+  if (el.parentElement) el.parentElement.removeChild(el);
+  parent.appendChild(el);
+}
+
+function removeStreamingDots(bubble) {
+  if (streamingDotsEl && streamingDotsEl.parentElement) {
+    streamingDotsEl.parentElement.removeChild(streamingDotsEl);
+  }
+  // Also clean up if there's a stray dots element in the bubble
+  const stray = bubble?.querySelector(".streaming-dots");
+  if (stray && stray !== streamingDotsEl) {
+    stray.parentElement.removeChild(stray);
+  }
+  streamingDotsEl = null;
+}
 
 // ── Content Helpers ───────────────────────────────────────────────────
 
@@ -426,6 +468,7 @@ function dispatchToUI(data) {
 function onAgentStart(data) {
   // If we already have an assistant bubble streaming, finalize it first
   if (assistantEl) {
+    removeStreamingDots(assistantEl);
     const raw = currentTextEl ? currentTextEl.getAttribute("data-raw") : assistantEl.getAttribute("data-raw");
     if (raw) {
       if (currentTextEl) currentTextEl.removeAttribute("data-raw");
@@ -443,12 +486,14 @@ function onAgentStart(data) {
   activeToolCallId = null;
   pendingToolCalls.clear();
   $("#loading-indicator").classList.remove("hidden");
+  showStreamingDots(assistantEl);
   scrollBottom();
 }
 
 function onAgentEnd(data) {
   $("#loading-indicator").classList.add("hidden");
   $("#btn-abort").classList.add("hidden");
+  if (assistantEl) removeStreamingDots(assistantEl);
   assistantEl = null;
   currentTextEl = null;
   thinkingEl = null;
@@ -472,11 +517,13 @@ function onMessageUpdate(evt) {
       if (!assistantEl) {
         const msg = createMessage("assistant", null);
         assistantEl = msg.bubble;
+        showStreamingDots(assistantEl);
       }
       if (!currentTextEl) {
         currentTextEl = document.createElement("div");
         currentTextEl.className = "assistant-text";
         assistantEl.appendChild(currentTextEl);
+        moveStreamingDotsToEnd(assistantEl);
       }
       break;
 
@@ -488,6 +535,7 @@ function onMessageUpdate(evt) {
           currentTextEl = document.createElement("div");
           currentTextEl.className = "assistant-text";
           assistantEl.appendChild(currentTextEl);
+          moveStreamingDotsToEnd(assistantEl);
         }
         let rawText = currentTextEl.getAttribute("data-raw") || "";
         rawText += evt.delta;
@@ -562,6 +610,7 @@ function onMessageUpdate(evt) {
       if (!toolBlocks.has(endId) && assistantEl) {
         const placeholder = buildToolBlock(tcName, tcArgs, undefined, "running", false);
         assistantEl.appendChild(placeholder);
+        moveStreamingDotsToEnd(assistantEl);
         toolBlocks.set(endId, {
           block: placeholder,
           outputEl: placeholder.querySelector(".tool-output"),
@@ -587,6 +636,7 @@ function createThinkingBlock() {
   // Freeze current text segment so future deltas create a new one after this block
   currentTextEl = null;
   assistantEl.appendChild(block);
+  moveStreamingDotsToEnd(assistantEl);
 }
 
 // ── Tool execution ────────────────────────────────────────────────────
@@ -598,6 +648,7 @@ function onToolExecutionStart(evt) {
   if (!assistantEl) {
     const msg = createMessage("assistant", null);
     assistantEl = msg.bubble;
+    showStreamingDots(assistantEl);
   }
 
   const toolCallId = evt.toolCallId || `tc_${Date.now()}`;
@@ -611,6 +662,7 @@ function onToolExecutionStart(evt) {
 
   const block = buildToolBlock(toolName, argsStr, undefined, "running", false);
   assistantEl.appendChild(block);
+  moveStreamingDotsToEnd(assistantEl);
 
   toolBlocks.set(toolCallId, {
     block,
@@ -688,6 +740,7 @@ function onToolExecutionEnd(evt) {
     const status = evt.isError ? "error" : "success";
     const block = buildToolBlock(toolName, argsStr, outputText, status, false);
     assistantEl.appendChild(block);
+    moveStreamingDotsToEnd(assistantEl);
   }
 
   activeToolCallId = null;
