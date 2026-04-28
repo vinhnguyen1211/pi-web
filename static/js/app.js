@@ -128,9 +128,26 @@ class PiClient {
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
+/** Threshold (px): if user's scroll position is within this distance of the bottom, treat them as "at the bottom". */
+const SCROLL_THRESHOLD = 50;
+
+/** Check whether the chat container is scrolled near the bottom. */
+function isNearBottom() {
+  const c = $("#chat-container");
+  if (!c) return true;
+  // scrollHeight - (scrollTop + clientHeight) = remaining pixels to the bottom edge
+  const remaining = c.scrollHeight - (c.scrollTop + c.clientHeight);
+  return remaining <= SCROLL_THRESHOLD;
+}
+
+/** Scroll to bottom — only if the user is already near the bottom. */
 function scrollBottom() {
   const c = $("#chat-container");
-  requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
+  requestAnimationFrame(() => {
+    if (isNearBottom()) {
+      c.scrollTop = c.scrollHeight;
+    }
+  });
 }
 
 function escapeHtml(str) {
