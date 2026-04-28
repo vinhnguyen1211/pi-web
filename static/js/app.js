@@ -205,6 +205,84 @@ function escapeHtml(str) {
   return d.innerHTML;
 }
 
+// ── Image Helpers ─────────────────────────────────────────────────────
+
+/** Convert a File/blob to base64 ImageContent format for the RPC protocol. */
+function fileToImageContent(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      // Strip "data:image/png;base64," prefix
+      const base64 = reader.result.split(",")[1];
+      resolve({ type: "image", data: base64, mimeType: file.type || "image/png" });
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Show staged images as thumbnail previews above the textarea. */
+function showImagePreviews(images) {
+  const strip = $("#image-preview-strip");
+  if (!strip) return;
+  strip.innerHTML = "";
+
+  for (const img of images) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "preview-thumb-wrapper";
+
+    const imgEl = document.createElement("img");
+    imgEl.src = `data:${img.mimeType};base64,${img.data}`;
+    imgEl.className = "preview-thumb";
+
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "preview-remove";
+    removeBtn.textContent = "\u2715"; // ✕
+    removeBtn.title = "Remove image";
+    removeBtn.onclick = () => {
+      wrapper.remove();
+      pendingImages = pendingImages.filter(i => i !== img);
+      if (pendingImages.length === 0) clearImagePreviews();
+    };
+
+    wrapper.appendChild(imgEl);
+    wrapper.appendChild(removeBtn);
+    strip.appendChild(wrapper);
+  }
+  strip.classList.remove("hidden");
+}
+
+/** Clear the image preview strip. */
+function clearImagePreviews() {
+  const strip = $("#image-preview-strip");
+  if (!strip) return;
+  strip.innerHTML = "";
+  strip.classList.add("hidden");
+}
+
+/** Update UI to reflect whether the current model supports images. */
+function updatePasteHint() {
+  const hint = $("#btn-paste-hint");
+  if (hint) {
+    hint.classList.toggle("hidden", !modelSupportsImages);
+  }
+}
+
+/** Check current model capabilities and set paste-hint visibility. */
+async function checkModelImageSupport() {
+  try {
+    const state = await client.getState();
+    const data = state?.data || state;
+    const model = data?.model;
+    modelSupportsImages = Array.isArray(model?.input) && model.input.includes("image");
+    updatePasteHint();
+  } catch {
+    // If we can't check, assume support (most models do)
+    modelSupportsImages = true;
+    updatePasteHint();
+  }
+}
+
 // Markdown renderer via marked library (loaded from CDN in index.html)
 function renderMarkdown(text) {
   if (!text) return '';
@@ -244,6 +322,8 @@ let activeToolCallId = null;        // Currently streaming tool execution
 let pendingToolCalls = new Map();   // toolUseId -> { name, args } (from toolcall_start/end before execution)
 let queueItems = [];
 let pendingUIRequest = null;        // { id, method, resolve } for extension_ui_request
+let pendingImages = [];             // Images staged for the next prompt ({ type, data, mimeType })
+let modelSupportsImages = false;    // Whether current model accepts images
 
 // ── Streaming Dots Helper ─────────────────────────────────────────────
 
@@ -518,7 +598,7 @@ function buildToolBlock(toolName, argsStr, outputText, status, open) {
 
 // ── Message Creation ──────────────────────────────────────────────────
 
-function createMessage(role, content) {
+function createMessage(role, content, images) {
   const div = document.createElement("div");
   div.className = `message ${role}`;
 
@@ -534,6 +614,19 @@ function createMessage(role, content) {
 
   if (content !== null) {
     bubble.innerHTML = content;
+  }
+
+  // Render attached images in user bubbles
+  if (images && images.length > 0) {
+    const imgGrid = document.createElement("div");
+    imgGrid.className = "message-images";
+    for (const img of images) {
+      const imgEl = document.createElement("img");
+      imgEl.src = `data:${img.mimeType};base64,${img.data}`;
+      imgEl.className = "message-image-thumb";
+      imgGrid.appendChild(imgEl);
+    }
+    bubble.appendChild(imgGrid);
   }
 
   wrapper.appendChild(bubble);
@@ -623,12 +716,20 @@ async function loadMessageHistory() {
             }
           }
         } else {
-          // User message: join text blocks
+          // User message: join text blocks + render image attachments
           const text = msg.content
             .filter((b) => b.type === "text")
             .map((b) => b.text)
             .join("\n");
-          if (text) createMessage("user", escapeHtml(text));
+          const images = (msg.content || [])
+            .filter((b) => b.type === "image")
+            .map((b) => ({ type: "image", data: b.data, mimeType: b.mimeType || "image/png" }));
+          // Also check attachments array
+          const attachImages = Array.isArray(msg.attachments)
+            ? msg.attachments.filter((a) => a.type === "image")
+            : [];
+          const allImages = [...images, ...attachImages.map((a) => ({ type: "image", data: a.content, mimeType: a.mimeType || "image/png" }))];
+          if (text || allImages.length > 0) createMessage("user", text ? escapeHtml(text) : null, allImages);
         }
       } else {
         // Legacy: content is a plain string
@@ -1181,11 +1282,17 @@ document.addEventListener("DOMContentLoaded", () => {
   // ── Send message ──
   async function sendMessage() {
     const text = input.value.trim();
-    if (!text) return;
+    if (!text && pendingImages.length === 0) return;
+
+    const images = [...pendingImages];
+    createMessage("user", text ? escapeHtml(text) : null, images);
+    await client.prompt(text || "Please analyze these images", images);
+
+    // Clear
     input.value = "";
     input.style.height = "auto";
-    createMessage("user", escapeHtml(text));
-    await client.prompt(text);
+    pendingImages = [];
+    clearImagePreviews();
   }
 
   sendBtn.addEventListener("click", sendMessage);
@@ -1193,6 +1300,62 @@ document.addEventListener("DOMContentLoaded", () => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
+    }
+  });
+
+  // ── Paste images from clipboard ──
+  input.addEventListener("paste", async (e) => {
+    try {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const imageFiles = [];
+      for (const item of items) {
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) imageFiles.push(file);
+        }
+      }
+      if (imageFiles.length === 0) return;
+
+      e.preventDefault(); // Don't paste raw clipboard data as text
+
+      const images = await Promise.all(imageFiles.map(fileToImageContent));
+      pendingImages = [...pendingImages, ...images];
+      showImagePreviews(pendingImages);
+    } catch (err) {
+      console.error("[paste] failed to process image:", err);
+    }
+  });
+
+  // ── Drag-and-drop images onto input area ──
+  const inputArea = $("#input-area");
+
+  ["dragenter", "dragover"].forEach((evt) => {
+    inputArea.addEventListener(evt, (e) => {
+      e.preventDefault();
+      inputArea.classList.add("drag-over");
+    });
+  });
+
+  ["dragleave", "drop"].forEach((evt) => {
+    inputArea.addEventListener(evt, (e) => {
+      e.preventDefault();
+      inputArea.classList.remove("drag-over");
+    });
+  });
+
+  inputArea.addEventListener("drop", async (e) => {
+    try {
+      const files = [...(e.dataTransfer?.files || [])];
+      const imageFiles = files.filter((f) => f.type.startsWith("image/"));
+      if (imageFiles.length === 0) return;
+
+      const images = await Promise.all(imageFiles.map(fileToImageContent));
+      pendingImages = [...pendingImages, ...images];
+      showImagePreviews(pendingImages);
+    } catch (err) {
+      console.error("[drop] failed to process image:", err);
     }
   });
 
@@ -1235,10 +1398,11 @@ document.addEventListener("DOMContentLoaded", () => {
     addSystemMessage("New session started");
     clearChatState();
 
-    // Load message history and token info for the current session
+    // Load message history, token info, and check model capabilities
     setTimeout(() => {
       loadMessageHistory();
       updateTokenInfo();
+      checkModelImageSupport();
     }, 500);
   });
 
@@ -1256,6 +1420,8 @@ function clearChatState() {
   toolBlocks.clear();
   activeToolCallId = null;
   pendingToolCalls.clear();
+  pendingImages = [];
+  clearImagePreviews();
 }
 
 // ── Token info display ────────────────────────────────────────────────
@@ -1432,10 +1598,11 @@ async function loadSessions() {
         addSystemMessage(`Connected to session: ${s.name}`);
         clearChatState();
 
-        // Brief pause, then load history
+        // Brief pause, then load history and check model capabilities
         setTimeout(async () => {
           await loadMessageHistory();
           updateTokenInfo();
+          checkModelImageSupport();
         }, 500);
       });
       container.appendChild(item);

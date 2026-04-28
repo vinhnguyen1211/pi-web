@@ -64,13 +64,18 @@
 
   <!-- Input area (shown when connected) -->
   <footer id="input-area" class="hidden">
-    <textarea
-      id="prompt-input"
-      placeholder="Send a message to Pi…"
-      rows="1"
-      autofocus
-    ></textarea>
-    <button id="btn-send" title="Send">↑</button>
+    <!-- Image preview strip — shown when images are staged -->
+    <div id="image-preview-strip" class="hidden"></div>
+    <div id="input-row">
+      <textarea
+        id="prompt-input"
+        placeholder="Send a message to Pi… (paste or drag-drop images)"
+        rows="1"
+        autofocus
+      ></textarea>
+      <button id="btn-paste-hint" class="hidden" title="Paste or drag-drop an image">🖼</button>
+      <button id="btn-send" title="Send">↑</button>
+    </div>
   </footer>
 
   <!-- Extension UI modal (select / confirm / input / editor) -->
