@@ -24,10 +24,12 @@ clean:
 	rm -f $(BINARY_NAME)
 	rm -rf $(EMBED_DIR)
 
-# Install to $GOPATH/bin (or $GOBIN if set)
-install: copy-static
-	go install ./$(CMD_DIR)
+# Install to $GOBIN or $GOPATH/bin with the custom binary name
+BINSRC ?= $(or $(GOBIN),$(GOPATH)/bin)
 
-# Uninstall from $GOPATH/bin
+install: copy-static
+	go build -o $(BINSRC)/$(BINARY_NAME) ./$(CMD_DIR)
+
+# Uninstall from $GOBIN or $GOPATH/bin
 uninstall:
-	go clean -i ./$(CMD_DIR)
+	rm -f $(BINSRC)/$(BINARY_NAME)
