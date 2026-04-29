@@ -25,7 +25,7 @@ clean:
 	rm -rf $(EMBED_DIR)
 
 # Install to $GOBIN or $GOPATH/bin with the custom binary name
-BINSRC ?= $(or $(GOBIN),$(GOPATH)/bin)
+BINSRC ?= $(HOME)/.local/bin
 
 install: copy-static
 	go build -o $(BINSRC)/$(BINARY_NAME) ./$(CMD_DIR)
