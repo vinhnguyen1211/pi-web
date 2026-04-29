@@ -504,26 +504,6 @@ body {
   gap: 8px;
 }
 
-/* Paste-hint button (shows when model supports images) */
-#btn-paste-hint {
-  width: 42px;
-  height: 42px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.2rem;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
-  padding: 0;
-  transition: border-color 0.15s;
-}
-
-#btn-paste-hint:hover {
-  border-color: var(--accent);
-}
-
 /* Drag-over highlight on input area */
 #input-area.drag-over {
   border-top-color: var(--accent) !important;

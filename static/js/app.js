@@ -260,29 +260,6 @@ function clearImagePreviews() {
   strip.classList.add("hidden");
 }
 
-/** Update UI to reflect whether the current model supports images. */
-function updatePasteHint() {
-  const hint = $("#btn-paste-hint");
-  if (hint) {
-    hint.classList.toggle("hidden", !modelSupportsImages);
-  }
-}
-
-/** Check current model capabilities and set paste-hint visibility. */
-async function checkModelImageSupport() {
-  try {
-    const state = await client.getState();
-    const data = state?.data || state;
-    const model = data?.model;
-    modelSupportsImages = Array.isArray(model?.input) && model.input.includes("image");
-    updatePasteHint();
-  } catch {
-    // If we can't check, assume support (most models do)
-    modelSupportsImages = true;
-    updatePasteHint();
-  }
-}
-
 // Markdown renderer via marked library (loaded from CDN in index.html)
 function renderMarkdown(text) {
   if (!text) return '';
@@ -323,7 +300,6 @@ let pendingToolCalls = new Map();   // toolUseId -> { name, args } (from toolcal
 let queueItems = [];
 let pendingUIRequest = null;        // { id, method, resolve } for extension_ui_request
 let pendingImages = [];             // Images staged for the next prompt ({ type, data, mimeType })
-let modelSupportsImages = false;    // Whether current model accepts images
 
 // ── Streaming Dots Helper ─────────────────────────────────────────────
 
@@ -1402,7 +1378,6 @@ document.addEventListener("DOMContentLoaded", () => {
     setTimeout(() => {
       loadMessageHistory();
       updateTokenInfo();
-      checkModelImageSupport();
     }, 500);
   });
 
@@ -1602,7 +1577,6 @@ async function loadSessions() {
         setTimeout(async () => {
           await loadMessageHistory();
           updateTokenInfo();
-          checkModelImageSupport();
         }, 500);
       });
       container.appendChild(item);
