@@ -110,6 +110,12 @@ class PiClient {
   async followUp(message) { await this.send({ type: "follow_up", message }); }
   async abort() { await this.send({ type: "abort" }); }
 
+  // Bash command execution (via RPC)
+  async bash(command) {
+    return this.sendAwait("bash", { command });
+  }
+  async abortBash() { await this.send({ type: "abort_bash" }); }
+
   // State queries — send with id, wait for response via SSE
   async getState() { return this.sendAwait("get_state"); }
   async getMessages() { return this.sendAwait("get_messages"); }
@@ -300,6 +306,7 @@ let pendingToolCalls = new Map();   // toolUseId -> { name, args } (from toolcal
 let queueItems = [];
 let pendingUIRequest = null;        // { id, method, resolve } for extension_ui_request
 let pendingImages = [];             // Images staged for the next prompt ({ type, data, mimeType })
+let activeBashAbort = null;         // Abort controller ref for user-initiated bash cancellation
 
 // ── Streaming Dots Helper ─────────────────────────────────────────────
 
@@ -566,6 +573,40 @@ function buildToolBlock(toolName, argsStr, outputText, status, open) {
 
   // Toggle on click
   block.querySelector(".tool-header").addEventListener("click", () => {
+    block.classList.toggle("open");
+  });
+
+  return block;
+}
+
+/** Build a bash command output block (for ! commands typed by the user). */
+function buildBashBlock(command, output, exitCode, isRunning) {
+  const block = document.createElement("div");
+  block.className = "bash-block";
+
+  let statusHtml;
+  if (isRunning) {
+    statusHtml = '<span class="tool-status status-running">⟳ Running…</span>';
+  } else if (exitCode === 0) {
+    statusHtml = '<span class="tool-status" style="color:var(--success)">✓ Exit 0</span>';
+  } else if (exitCode != null) {
+    statusHtml = `<span class="tool-status" style="color:var(--danger)">✗ Exit ${exitCode}</span>`;
+  } else {
+    statusHtml = '<span class="tool-status" style="color:var(--text-muted)">Cancelled</span>';
+  }
+
+  block.innerHTML = `
+    <div class="bash-header">
+      <span class="bash-arrow">▶</span>
+      <span class="bash-cmd">$ ${escapeHtml(command)}</span>
+      ${statusHtml}
+    </div>
+    <div class="bash-body">
+      <pre class="bash-output">${output !== null && output !== undefined ? escapeHtml(output) : ""}</pre>
+    </div>
+  `;
+
+  block.querySelector(".bash-header").addEventListener("click", () => {
     block.classList.toggle("open");
   });
 
@@ -1256,19 +1297,33 @@ document.addEventListener("DOMContentLoaded", () => {
   const newSessionBtn = $("#btn-new-session");
 
   // ── Send message ──
+  function resetInput() {
+    input.value = "";
+    input.style.height = "auto";
+    pendingImages = [];
+    clearImagePreviews();
+    input.classList.remove("bash-mode");
+    inputRow.classList.remove("bash-mode");
+  }
+
   async function sendMessage() {
     const text = input.value.trim();
     if (!text && pendingImages.length === 0) return;
+
+    // Detect bash command: starts with "!"
+    if (text.startsWith("!") && !pendingImages.length) {
+      const command = text.slice(1).trim();
+      if (!command) return;
+      await sendBashCommand(command);
+      resetInput();
+      return;
+    }
 
     const images = [...pendingImages];
     createMessage("user", text ? escapeHtml(text) : null, images);
     await client.prompt(text || "Please analyze these images", images);
 
-    // Clear
-    input.value = "";
-    input.style.height = "auto";
-    pendingImages = [];
-    clearImagePreviews();
+    resetInput();
   }
 
   sendBtn.addEventListener("click", sendMessage);
@@ -1335,10 +1390,16 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Auto-resize textarea
+  // Auto-resize textarea + toggle bash mode styling
+  const inputRow = $("#input-row");
   input.addEventListener("input", () => {
     input.style.height = "auto";
     input.style.height = Math.min(input.scrollHeight, 200) + "px";
+
+    // Toggle green bash-mode styling when text starts with "!"
+    const isBash = input.value.trim().startsWith("!");
+    input.classList.toggle("bash-mode", isBash);
+    inputRow.classList.toggle("bash-mode", isBash);
   });
 
   // ── Abort ──
@@ -1608,4 +1669,62 @@ function addSystemMessage(text) {
   div.textContent = `— ${text} —`;
   $("#messages").appendChild(div);
   scrollBottom();
+}
+
+// ── Bash command execution (via ! prefix) ─────────────────────────────
+
+/** Send a bash command via the RPC "bash" type and render output in chat. */
+async function sendBashCommand(command) {
+  // Show user message with the command
+  const { bubble: userBubble } = createMessage("user", `<code class="bash-inline-cmd">!${escapeHtml(command)}</code>`);
+
+  // Create an assistant bubble for the result
+  const msg = createMessage("assistant", null);
+  const assistantBubble = msg.bubble;
+
+  // Build a running state block
+  const block = buildBashBlock(command, "", null, true);
+  assistantBubble.appendChild(block);
+  scrollBottom();
+
+  const outputEl = block.querySelector(".bash-output");
+  const statusEl = block.querySelector(".tool-status");
+
+  try {
+    const result = await client.bash(command);
+    const data = result?.data || result;
+
+    const output = data?.output ?? "";
+    const exitCode = data?.exitCode ?? (data?.cancelled ? null : -1);
+    const cancelled = !!data?.cancelled;
+
+    // Update the block with results
+    outputEl.textContent = output;
+    if (cancelled) {
+      statusEl.textContent = "Cancelled";
+      statusEl.style.color = "var(--text-muted)";
+      statusEl.className = "tool-status";
+    } else if (exitCode === 0) {
+      statusEl.textContent = "✓ Exit 0";
+      statusEl.style.color = "var(--success)";
+      statusEl.className = "tool-status status-success";
+    } else {
+      statusEl.textContent = `✗ Exit ${exitCode}`;
+      statusEl.style.color = "var(--danger)";
+      statusEl.className = "tool-status status-error";
+    }
+
+    // Auto-open if there's output or error
+    if (output || exitCode !== 0) {
+      block.classList.add("open");
+    }
+
+    scrollBottom();
+  } catch (err) {
+    statusEl.textContent = "✗ Failed";
+    statusEl.style.color = "var(--danger)";
+    outputEl.textContent = err.message || "Command execution failed";
+    block.classList.add("open");
+    scrollBottom();
+  }
 }

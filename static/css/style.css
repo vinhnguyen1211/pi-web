@@ -325,6 +325,70 @@ body {
   min-width: 0;
 }
 
+/* ===== Bash command blocks (! prefix) ===== */
+.bash-block {
+  margin: 6px 0;
+  border: 1px solid #5a8f4a;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--tool-bg);
+  white-space: normal;
+  width: 100%;
+}
+
+.bash-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  color: #7db86a;
+  font-size: 0.82rem;
+  user-select: none;
+  background: rgba(90, 143, 74, 0.1);
+}
+
+.bash-header:hover { opacity: 0.85; }
+
+.bash-cmd {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.bash-body {
+  display: none;
+  padding: 6px 10px 8px;
+  width: 100%;
+}
+
+.bash-block.open .bash-body { display: block; }
+.bash-block.open .bash-arrow { transform: rotate(90deg); }
+
+.bash-arrow {
+  transition: transform 0.15s;
+  font-size: 0.7rem;
+}
+
+.bash-output {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* Inline bash command in user messages */
+.bash-inline-cmd {
+  font-family: var(--font-mono);
+  background: rgba(90, 143, 74, 0.2);
+  color: #7db86a;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
 /* ===== Tool calls ===== */
 .tool-block {
   margin: 6px 0;
@@ -497,6 +561,32 @@ body {
 }
 
 #prompt-input:focus { border-color: var(--accent); }
+
+/* Bash mode: green tint when user types ! command */
+#prompt-input.bash-mode {
+  font-family: var(--font-mono);
+  border-color: #5a8f4a;
+  background: rgba(90, 143, 74, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(90, 143, 74, 0.2);
+}
+
+#prompt-input.bash-mode:focus {
+  border-color: #7db86a;
+  background: rgba(90, 143, 74, 0.12);
+}
+
+/* Small bash badge shown on the send button in bash mode */
+#btn-send .bash-badge {
+  display: none;
+}
+
+#input-row.bash-mode #btn-send .bash-badge {
+  display: inline;
+}
+
+#input-row.bash-mode #btn-send .send-arrow {
+  display: none;
+}
 
 /* Row wrapper for textarea + buttons inside column layout input-area */
 #input-row {
