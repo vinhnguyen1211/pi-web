@@ -488,8 +488,7 @@ function buildDiffHtml(oldText, newText) {
   // Build HTML table-like structure with flexbox
   let html = '<div class="diff-container">';
 
-  // Header row
-  html += '<div class="diff-row" style="display:flex;">';
+  // Old column
   html += '<div class="diff-column"><div class="diff-header-cell">Original</div>';
   const oldRowsHtml = rows.map(r => {
     const num = r.oldNum != null ? escapeHtml(String(r.oldNum)) : "";
@@ -508,7 +507,7 @@ function buildDiffHtml(oldText, newText) {
   }).join("");
   html += newRowsHtml + '</div>';
 
-  html += '</div></div>';
+  html += '</div>';
   return html;
 }
 

@@ -220,22 +220,21 @@ body {
 /* ===== Diff view (Edit tool — two-column side-by-side) ===== */
 .diff-container {
   display: flex;
-  gap: 0;
+  align-items: stretch; /* stretch both columns to the same height */
   font-family: var(--font-mono);
   font-size: 0.78rem;
   line-height: 1.6;
   width: 100%;
-  max-width: 100%;
   border-radius: 6px;
   border: 1px solid var(--border);
   margin-top: 4px;
 }
 
 .diff-column {
-  flex: 1 1 50%;
+  flex: 1; /* equal share of remaining space after separator */
   min-width: 0;
-  max-width: 50%;
   overflow-x: auto;
+  align-self: stretch; /* explicit stretch to match sibling column height */
 }
 
 .diff-header-cell {
@@ -247,10 +246,6 @@ body {
   letter-spacing: 0.04em;
   border-bottom: 1px solid var(--border);
   background: rgba(204, 120, 92, 0.06);
-}
-
-.diff-row {
-  display: flex;
 }
 
 .diff-line {
