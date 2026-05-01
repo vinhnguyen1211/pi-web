@@ -76,11 +76,17 @@ class PiClient {
 
   // ── Connect / Disconnect ──
 
-  /** Spawn a new agent: either fresh or resume from session path. */
-  async connectAgent(sessionPath) {
+  /** Spawn a new agent: either fresh or resume from session path.
+   *  @param {string} sessionPath - Optional session .jsonl path for resuming
+   *  @param {string} [folderPath] - Optional folder to set as working directory
+   */
+  async connectAgent(sessionPath, folderPath) {
     const body = sessionPath
       ? { type: "resume", sessionPath }
       : { type: "new" };
+    if (folderPath) {
+      body.folderPath = folderPath;
+    }
 
     const resp = await fetch("/api/connect", {
       method: "POST",
@@ -1453,6 +1459,14 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 500);
   });
 
+  // ── Open Folder from selection screen ──
+  const openFolderBtn = $("#btn-open-folder");
+  if (openFolderBtn) {
+    openFolderBtn.addEventListener("click", () => {
+      showFolderPicker();
+    });
+  }
+
   // ── Load sessions on startup ──
   showSessionScreen();
   loadSessions();
@@ -1680,6 +1694,104 @@ function addSystemMessage(text) {
   div.textContent = `— ${text} —`;
   $("#messages").appendChild(div);
   scrollBottom();
+}
+
+// ── Folder Picker ─────────────────────────────────────────────────────
+
+/** Show the "Open Folder" modal dialog for selecting a project directory. */
+function showFolderPicker() {
+  const modal = $("#extension-modal");
+  const titleEl = $("#modal-title");
+  const messageEl = $("#modal-message");
+  const bodyEl = $("#modal-body");
+  const cancelBtn = $("#modal-btn-cancel");
+  const confirmBtn = $("#modal-btn-confirm");
+
+  titleEl.textContent = "Open Project Folder";
+  messageEl.textContent = "Enter the path to a project directory on this computer";
+  bodyEl.innerHTML = `
+    <input type="text" id="folder-path-input" placeholder="/home/user/projects/my-app" autofocus>
+    <div id="folder-error" class="hidden"></div>
+  `;
+
+  const pathInput = $("#folder-path-input");
+  const errorEl = $("#folder-error");
+
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.classList.remove("hidden");
+  confirmBtn.textContent = "Open";
+
+  /** Validate, connect to folder, and switch to chat screen. */
+  async function openFolder() {
+    const path = pathInput.value.trim();
+    if (!path) {
+      errorEl.textContent = "Please enter a folder path.";
+      errorEl.classList.remove("hidden");
+      return;
+    }
+
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Connecting…";
+
+    try {
+      const resp = await fetch("/api/connect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Conn-Id": CONN_ID,
+        },
+        body: JSON.stringify({
+          type: "new",
+          folderPath: path,
+        }),
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        errorEl.textContent = `Failed to open folder: ${text}`;
+        errorEl.classList.remove("hidden");
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = "Open";
+        return;
+      }
+
+      const result = await resp.json();
+      modal.close();
+
+      // Connect SSE stream
+      client.connect(result.connId);
+      showChatScreen();
+      $("#messages").innerHTML = "";
+      clearChatState();
+
+      const folderName = path.split("/").filter(Boolean).pop();
+      addSystemMessage(`Opened project: ${folderName}`);
+
+      // Load message history and token info
+      setTimeout(() => {
+        loadMessageHistory();
+        updateTokenInfo();
+      }, 500);
+    } catch (err) {
+      errorEl.textContent = `Connection failed: ${err.message}`;
+      errorEl.classList.remove("hidden");
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "Open";
+    }
+  }
+
+  // Enter key submits
+  pathInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      openFolder();
+    }
+  });
+
+  confirmBtn.onclick = () => { openFolder(); };
+  cancelBtn.onclick = () => { modal.close(); };
+
+  modal.showModal();
 }
 
 // ── Bash command execution (via ! prefix) ─────────────────────────────

@@ -672,7 +672,7 @@ body {
   border: 1px solid var(--border);
 }
 
-/* ===== Extension UI modal ===== */
+/* ===== Extension UI modal — centered on screen ===== */
 dialog#extension-modal {
   background: var(--bg-surface);
   color: var(--text);
@@ -681,9 +681,13 @@ dialog#extension-modal {
   padding: 0;
   max-width: 480px;
   width: 90%;
+  height: fit-content;
+  margin: auto;
 }
 
-dialog#extension-modal::backdrop { background: rgba(0, 0, 0, 0.5); }
+dialog#extension-modal::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
 
 .modal-content { padding: 20px; }
 
@@ -708,6 +712,24 @@ dialog#extension-modal::backdrop { background: rgba(0, 0, 0, 0.5); }
 #modal-btn-confirm { background: var(--accent); color: #fff; border: none; }
 #modal-btn-confirm:hover { background: var(--accent-hover); }
 #modal-btn-cancel:hover { background: var(--bg-input); }
+
+/* Folder picker modal styles */
+#folder-path-input {
+  font-family: var(--font-mono);
+}
+
+#btn-browse-folder {
+  margin-top: 8px;
+  font-size: 0.85rem;
+  padding: 6px 14px;
+}
+
+#folder-error {
+  color: var(--danger);
+  font-size: 0.8rem;
+  min-height: 1.2em;
+  margin-top: 6px;
+}
 
 /* Extension notification toast */
 #extension-notify {
@@ -777,6 +799,17 @@ dialog#extension-modal::backdrop { background: rgba(0, 0, 0, 0.5); }
 
 .btn-primary:hover {
   background: var(--accent-hover) !important;
+}
+
+/* Secondary button — outline style for "Open Folder" */
+.btn-secondary {
+  background: transparent !important;
+  border: 2px solid var(--accent) !important;
+  color: var(--accent) !important;
+}
+
+.btn-secondary:hover {
+  background: rgba(204, 120, 92, 0.1) !important;
 }
 
 .btn-icon {

@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"piweb/internal/manager"
@@ -19,11 +20,19 @@ import (
 type Router struct {
 	mgr      *manager.Manager
 	staticFS embed.FS
+	allowed  bool // whether to allow opening arbitrary folders (default: true)
 }
 
 // New creates a new Router with the given agent manager and embedded static filesystem.
+// Folder opening is enabled by default.
 func New(m *manager.Manager, staticFS embed.FS) *Router {
-	return &Router{mgr: m, staticFS: staticFS}
+	return &Router{mgr: m, staticFS: staticFS, allowed: true}
+}
+
+// NewRestricted creates a Router that does NOT allow opening arbitrary folders.
+// Only new sessions and session resumption are supported.
+func NewRestricted(m *manager.Manager, staticFS embed.FS) *Router {
+	return &Router{mgr: m, staticFS: staticFS, allowed: false}
 }
 
 // ServeMux returns an http.Handler serving all routes.
@@ -42,6 +51,9 @@ func (r *Router) ServeMux() http.Handler {
 	// List reusable sessions
 	mux.HandleFunc("GET /api/sessions", r.handleSessions)
 
+	// Open a project folder (v2 feature)
+	mux.HandleFunc("POST /api/open-folder", r.handleOpenFolder)
+
 	// Static files: root serves index.html, everything else maps to embedded static/
 	mux.HandleFunc("GET /{path...}", r.handleStatic)
 
@@ -50,6 +62,7 @@ func (r *Router) ServeMux() http.Handler {
 
 // handleConnect spawns a new pi agent for the requesting connection.
 // Request body: {"type": "new"} or {"type": "resume", "sessionPath": "/path/to/session.jsonl"}
+// Optional: {"folderPath": "/path/to/project"} to set working directory.
 func (r *Router) handleConnect(w http.ResponseWriter, req *http.Request) {
 	connID := req.Header.Get("X-Conn-Id")
 	if connID == "" {
@@ -60,6 +73,7 @@ func (r *Router) handleConnect(w http.ResponseWriter, req *http.Request) {
 	var body struct {
 		Type        string `json:"type"`
 		SessionPath string `json:"sessionPath,omitempty"`
+		FolderPath  string `json:"folderPath,omitempty"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -79,7 +93,7 @@ func (r *Router) handleConnect(w http.ResponseWriter, req *http.Request) {
 		sessionPath = body.SessionPath
 	}
 
-	a, err := r.mgr.Spawn(connID, sessionPath)
+	a, err := r.mgr.Spawn(connID, sessionPath, body.FolderPath)
 	if err != nil {
 		log.Printf("handler: connect error: %v", err)
 		http.Error(w, fmt.Sprintf("spawn failed: %v", err), http.StatusInternalServerError)
@@ -88,9 +102,10 @@ func (r *Router) handleConnect(w http.ResponseWriter, req *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"ok":     true,
-		"connId": connID,
-		"pid":    a.PID(),
+		"ok":        true,
+		"connId":    connID,
+		"pid":       a.PID(),
+		"folderPath": body.FolderPath,
 	})
 }
 
@@ -189,6 +204,43 @@ func (r *Router) handleCommand(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, `{"ok":true}`)
+}
+
+// handleOpenFolder accepts a folder path and opens it for the given connection.
+// Request body: {"folderPath": "/path/to/project", "connId": "..."}
+func (r *Router) handleOpenFolder(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		FolderPath string `json:"folderPath"`
+		ConnID     string `json:"connId,omitempty"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	if body.FolderPath == "" {
+		http.Error(w, `{"error":"folderPath is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if !r.allowed {
+		http.Error(w, `{"error":"opening arbitrary folders is disabled"}`, http.StatusForbidden)
+		return
+	}
+
+	if err := r.mgr.OpenFolder(body.ConnID, body.FolderPath); err != nil {
+		log.Printf("handler: open-folder error: %v", err)
+		http.Error(w, fmt.Sprintf("failed to open folder: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	abs, _ := filepath.Abs(body.FolderPath)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"ok":       true,
+		"folder":   abs,
+		"connId":   body.ConnID,
+	})
 }
 
 // handleSessions scans ~/.pi/agent/sessions and returns available sessions.
