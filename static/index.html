@@ -2,7 +2,7 @@
 <html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Pi Web</title>
   <link rel="stylesheet" href="/css/style.css">
 </head>
@@ -63,11 +63,10 @@
     <div id="queue-items"></div>
   </div>
 
-  <!-- Abort button (visible while streaming) -->
-  <button id="btn-abort" class="hidden" title="Abort current response">⏹ Abort</button>
-
   <!-- Input area (shown when connected) -->
   <footer id="input-area" class="hidden">
+    <!-- Abort button (visible while streaming) -->
+    <button id="btn-abort" class="hidden" title="Abort current response">⏹ Abort</button>
     <!-- Image preview strip — shown when images are staged -->
     <div id="image-preview-strip" class="hidden"></div>
     <div id="input-row">

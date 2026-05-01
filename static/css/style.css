@@ -41,6 +41,7 @@
 
 html, body {
   height: 100%;
+  height: 100dvh;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: var(--bg);
   color: var(--text);
@@ -123,9 +124,11 @@ body {
 
 #chat-container {
   flex: 1;
+  min-height: 0; /* allows flex child to shrink below content size (mobile keyboard) */
   overflow-y: auto;
   scroll-behavior: smooth;
   padding: 16px;
+  overscroll-behavior: contain;
 }
 
 /* ===== Messages ===== */
@@ -512,16 +515,12 @@ body {
 
 /* ===== Abort button ===== */
 #btn-abort {
-  position: fixed;
-  bottom: 80px;
-  left: 50%;
-  transform: translateX(-50%);
+  align-self: center;
   background: var(--danger);
   color: #fff;
   border: none;
   padding: 6px 18px;
   font-size: 0.85rem;
-  z-index: 100;
   box-shadow: 0 4px 12px rgba(168, 75, 58, 0.4);
 }
 
@@ -536,6 +535,7 @@ body {
   background: var(--bg-surface);
   border-top: 1px solid var(--border);
   width: 100%;
+  padding-bottom: env(safe-area-inset-bottom, 12px); /* iOS notch home bar */
 }
 
 #prompt-input {
@@ -755,6 +755,7 @@ dialog#extension-modal::backdrop {
   align-items: center;
   justify-content: center;
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
 }
 
@@ -848,6 +849,8 @@ dialog#extension-modal::backdrop {
   width: 100%;
   max-height: 50vh;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .session-item {
@@ -895,17 +898,98 @@ dialog#extension-modal::backdrop {
 /* ===== Utility ===== */
 .hidden { display: none !important; }
 
+/* ── Global: prevent unwanted text selection / tap highlights on non-text UI ── */
+#btn-theme-toggle,
+.session-item {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
-/* ===== Responsive ===== */
-@media (max-width: 600px) {
-  .message-content { max-width: 88%; }
-  #header { padding: 6px 10px; gap: 4px; }
-  .logo { font-size: 0.95rem; }
-  select, button { font-size: 0.78rem; padding: 4px 7px; }
-  #input-area { padding: 8px 10px; }
+/* ===== Responsive: tablets and smaller ===== */
+@media (max-width: 768px) {
+  .message-content { max-width: 90%; }
+}
+
+/* ===== Responsive: small phones ===== */
+@media (max-width: 480px) {
+  /* ── Header — hide token info bar to save space, shrink logo ── */
+  #header { padding: 6px 8px; gap: 4px; }
+  .logo { font-size: 0.9rem; }
+  .token-info { display: none; }
+
+  /* ── Textarea — 16px prevents iOS auto-zoom on focus ── */
+  #prompt-input {
+    padding: 8px 10px;
+    font-size: 16px;
+  }
+
+  /* ── Input area — tighter spacing ── */
+  #input-area { padding: 6px 8px; gap: 4px; }
+
+  /* ── Send button — larger touch target ── */
+  #btn-send { width: 48px; height: 48px; }
+
+  /* ── Messages — tighter avatars and content ── */
+  .message-avatar { width: 26px; height: 26px; font-size: 0.75rem; }
+  .bubble { padding: 8px 10px; }
+
+  /* ── Queue items — truncate more ── */
+  .queue-item { max-width: 140px; }
+
+  /* ── Tool / bash headers — larger touch targets ── */
+  .tool-header, .bash-header { padding: 8px 10px; font-size: 0.78rem; }
+  .tool-body, .bash-body { padding: 4px 8px 6px; }
+  .tool-args, .tool-output, .bash-output { font-size: 0.75rem; }
+
+  /* ── Inline bash command in user messages ── */
+  .bash-inline-cmd { font-size: 0.82rem; padding: 1px 5px; }
+
+  /* ── Image thumbnails — fit within bubble ── */
+  .message-images { gap: 4px; }
+  .message-image-thumb {
+    max-width: calc(100% - 8px);
+    max-height: 200px;
+    touch-action: manipulation;
+  }
+
+  /* ── Side-by-side diff → stacked vertical layout ── */
+  .diff-container { flex-direction: column; }
+  .diff-separator { width: 100%; height: 1px; background: var(--border); }
+  .diff-column { margin-bottom: 8px; }
+  .diff-header-cell { font-size: 0.68rem; }
+
+  /* ── Extension modal — nearly full screen ── */
+  dialog#extension-modal { width: 95%; border-radius: 12px; }
+  #modal-body input, #modal-body textarea, #modal-body select {
+    font-size: 16px; padding: 10px 14px;
+  }
+
+  /* ── Notification toast — wider on narrow screens ── */
+  #extension-notify { right: 8px; left: 8px; max-width: none; top: 56px; }
+
+  /* ── Disable tap highlight and prevent selection on interactive UI ── */
+  .message-avatar,
+  .tool-header, .bash-header,
+  .session-item,
+  .preview-remove,
+  #btn-send, #btn-theme-toggle {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* ── Landscape phones ── */
+@media (max-width: 600px) and (orientation: landscape) {
+  #header { padding: 4px 10px; }
+  .logo { font-size: 0.85rem; }
+  select, button { font-size: 0.75rem; padding: 3px 6px; }
+  #chat-container { padding: 8px; }
+  .message { padding: 6px 0; }
+  .bubble { padding: 8px 10px; }
+  .message-avatar { width: 24px; height: 24px; font-size: 0.7rem; }
 }
