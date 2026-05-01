@@ -2,10 +2,14 @@
 
 A web-based client for the [Pi Coding Agent](https://pi.dev). Built with Qwen3.6 27B (Unsloth Q6_K).
 
-Light mode:
+<img width="1007" height="814" alt="image" src="https://github.com/user-attachments/assets/31e6a7a5-2c95-4fda-a2a2-7f3678974fac" />
 
-<img width="1723" height="1031" alt="image" src="https://github.com/user-attachments/assets/0887cdfd-02a1-434e-a69c-69693f095695" />
+## How to install
 
-Dark mode:
+Clone the repo, and run:
 
-<img width="1727" height="1032" alt="image" src="https://github.com/user-attachments/assets/eef7da89-3715-4f45-a04b-3e45c8132ba2" />
+```
+$ make install
+```
+
+Oh, make sure you have Go installed on your machine though.
