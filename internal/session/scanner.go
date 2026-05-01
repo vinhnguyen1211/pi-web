@@ -118,13 +118,18 @@ func readSession(path string) SessionInfo {
 	}
 }
 
-// extractFirstUserMessage tries to parse a JSONL line as a user message and return its text.
+// extractFirstUserMessage tries to parse a JSONL line as a user message
+// and return its first text block.
+//
+// Content is decoded as []json.RawMessage so that image blocks (which contain
+// a huge base64 "data" field) are never fully decoded into Go strings — the
+// raw bytes stay in the original line buffer, saving memory.
 func extractFirstUserMessage(line []byte) string {
 	var envelope struct {
 		Type    string `json:"type"`
 		Message struct {
-			Role    string      `json:"role"`
-			Content interface{} `json:"content"`
+			Role    string            `json:"role"`
+			Content []json.RawMessage `json:"content"`
 		} `json:"message"`
 	}
 	if err := json.Unmarshal(line, &envelope); err != nil {
@@ -134,27 +139,29 @@ func extractFirstUserMessage(line []byte) string {
 		return ""
 	}
 
-	// Extract text from content array [{ type: "text", text: "..." }]
-	switch c := envelope.Message.Content.(type) {
-	case []interface{}:
-		for _, block := range c {
-			if m, ok := block.(map[string]interface{}); ok && m["type"] == "text" {
-				text, _ := m["text"].(string)
-				if text != "" {
-					// Trim and truncate to a readable excerpt
-					text = strings.TrimSpace(text)
-					// Remove internal newlines for single-line display
-					text = strings.ReplaceAll(text, "\n", " ")
-					text = strings.ReplaceAll(text, "\r", "")
-					if len(text) > 80 {
-						return text[:77] + "…"
-					}
-					return text
-				}
-			}
+	for _, raw := range envelope.Message.Content {
+		// Peek at the type field cheaply.
+		var typed struct {
+			Type string `json:"type"`
 		}
-	case string:
-		text := strings.TrimSpace(c)
+		if err := json.Unmarshal(raw, &typed); err != nil || typed.Type != "text" {
+			continue // skip image blocks — never decode the "data" field
+		}
+
+		var textBlock struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(raw, &textBlock); err != nil {
+			continue
+		}
+
+		text := strings.TrimSpace(textBlock.Text)
+		text = strings.ReplaceAll(text, "\n", " ")
+		text = strings.ReplaceAll(text, "\r", "")
+		if text == "" {
+			continue
+		}
+
 		if len(text) > 80 {
 			return text[:77] + "…"
 		}
