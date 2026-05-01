@@ -80,6 +80,9 @@ func readSession(path string) SessionInfo {
 
 	var header Header
 	scanner := bufio.NewScanner(f)
+	// Lines with embedded images can be very large (base64 data), so increase buffer.
+	// Default MaxScanTokenSize is 64KB; images in messages routinely exceed that.
+	scanner.Buffer(make([]byte, 1024), 5*1024*1024) // up to 5 MB per line
 
 	// Read first line for header
 	if scanner.Scan() {
