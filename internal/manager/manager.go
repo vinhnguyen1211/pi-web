@@ -9,28 +9,44 @@ import (
 
 // Manager tracks per-connection Pi agent instances.
 type Manager struct {
-	mu      sync.RWMutex
-	agents  map[string]*agent.Agent // connId -> Agent
-	cwd     string
+	mu       sync.RWMutex
+	agents   map[string]*agent.Agent // connId -> Agent
+	cwd      string
+	provider string
+	model    string
 }
 
-// New creates a new Manager with the given working directory.
-func New(cwd string) *Manager {
+// New creates a new Manager with the given working directory, provider, and model.
+func New(cwd, provider, model string) *Manager {
 	return &Manager{
-		agents: make(map[string]*agent.Agent),
-		cwd:    cwd,
+		agents:   make(map[string]*agent.Agent),
+		cwd:      cwd,
+		provider: provider,
+		model:    model,
 	}
 }
 
 // Spawn creates a new pi agent subprocess for the given connection.
 // If sessionPath is non-empty, it passes --session to pi.
-func (m *Manager) Spawn(connID, sessionPath string) (*agent.Agent, error) {
+// If cwd is non-empty, it overrides the manager's default cwd.
+func (m *Manager) Spawn(connID, sessionPath, cwd string) (*agent.Agent, error) {
 	args := []string{"--mode", "rpc"}
+	if m.provider != "" {
+		args = append(args, "--provider", m.provider)
+	}
+	if m.model != "" {
+		args = append(args, "--model", m.model)
+	}
 	if sessionPath != "" {
 		args = append(args, "--session", sessionPath)
 	}
 
-	a, err := agent.New(m.cwd, args...)
+	useCwd := m.cwd
+	if cwd != "" {
+		useCwd = cwd
+	}
+
+	a, err := agent.New(useCwd, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -13,9 +13,24 @@
       <div class="session-logo">πcode</div>
       <p class="session-subtitle">Choose a session to connect or start a new one</p>
 
-      <button id="btn-new-session" class="btn-primary">
+      <button id="btn-new-session" class="btn-primary" disabled>
         <span class="btn-icon">+</span> New Session
       </button>
+
+      <div id="workspace-row" class="workspace-row">
+        <select id="workspace-select" disabled>
+          <option disabled selected>Select workspace…</option>
+        </select>
+        <button id="btn-add-workspace" title="Add workspace">+</button>
+      </div>
+
+      <div id="add-workspace-form" class="hidden">
+        <input id="workspace-name-input" type="text" placeholder="Name" spellcheck="false">
+        <input id="workspace-path-input" type="text" placeholder="/absolute/path/to/project" spellcheck="false">
+        <button id="btn-browse-workspace">Browse</button>
+        <button id="btn-save-workspace" class="btn-primary">Save</button>
+        <button id="btn-cancel-workspace">Cancel</button>
+      </div>
 
       <div id="session-list-container" class="hidden">
         <div class="session-divider">
@@ -29,10 +44,13 @@
   <!-- Header bar (shown when connected) -->
   <header id="header" class="hidden">
     <div class="header-left">
-      <span class="logo">πcode</span>
+      <a class="logo" href="/">πcode</a>
       <button id="btn-disconnect" title="Disconnect and return to session list">Disconnect</button>
     </div>
     <div class="header-right">
+      <select id="model-select" class="hidden" title="Change model">
+        <option disabled selected>Model</option>
+      </select>
       <span id="token-info" class="token-info hidden"></span>
       <button id="btn-theme-toggle" title="Toggle dark/light theme">◑</button>
     </div>

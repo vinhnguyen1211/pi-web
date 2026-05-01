@@ -16,13 +16,15 @@ import (
 func main() {
 	cwd := flag.String("cwd", "", "Working directory (default: $PWD)")
 	addr := flag.String("addr", ":9000", "HTTP listen address")
+	provider := flag.String("provider", "", "Provider name passed to pi (default: pi settings)")
+	model := flag.String("model", "", "Model ID or pattern passed to pi (default: pi settings)")
 	flag.Parse()
 
 	if *cwd == "" {
 		*cwd, _ = os.Getwd()
 	}
 
-	mgr := manager.New(*cwd)
+	mgr := manager.New(*cwd, *provider, *model)
 
 	r := handler.New(mgr, staticFS)
 

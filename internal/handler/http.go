@@ -9,10 +9,14 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 
 	"piweb/internal/manager"
 	"piweb/internal/session"
+	"piweb/internal/workspace"
 )
 
 // Router wires up all HTTP routes for the Pi web client.
@@ -42,6 +46,11 @@ func (r *Router) ServeMux() http.Handler {
 	// List reusable sessions
 	mux.HandleFunc("GET /api/sessions", r.handleSessions)
 
+	// Workspace management
+	mux.HandleFunc("GET /api/workspaces", r.handleWorkspaces)
+	mux.HandleFunc("POST /api/workspaces", r.handleAddWorkspace)
+	mux.HandleFunc("POST /api/browse", r.handleBrowse)
+
 	// Static files: root serves index.html, everything else maps to embedded static/
 	mux.HandleFunc("GET /{path...}", r.handleStatic)
 
@@ -60,6 +69,7 @@ func (r *Router) handleConnect(w http.ResponseWriter, req *http.Request) {
 	var body struct {
 		Type        string `json:"type"`
 		SessionPath string `json:"sessionPath,omitempty"`
+		Cwd         string `json:"cwd,omitempty"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -79,7 +89,7 @@ func (r *Router) handleConnect(w http.ResponseWriter, req *http.Request) {
 		sessionPath = body.SessionPath
 	}
 
-	a, err := r.mgr.Spawn(connID, sessionPath)
+	a, err := r.mgr.Spawn(connID, sessionPath, body.Cwd)
 	if err != nil {
 		log.Printf("handler: connect error: %v", err)
 		http.Error(w, fmt.Sprintf("spawn failed: %v", err), http.StatusInternalServerError)
@@ -204,6 +214,85 @@ func (r *Router) handleSessions(w http.ResponseWriter, req *http.Request) {
 	json.NewEncoder(w).Encode(sessions)
 }
 
+// handleWorkspaces returns the list of saved workspaces.
+func (r *Router) handleWorkspaces(w http.ResponseWriter, req *http.Request) {
+	ws, err := workspace.Load()
+	if err != nil {
+		log.Printf("handler: workspace load error: %v", err)
+		http.Error(w, fmt.Sprintf("load failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if ws == nil {
+		ws = []workspace.Workspace{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ws)
+}
+
+// handleAddWorkspace adds a workspace path to the store.
+func (r *Router) handleAddWorkspace(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	if body.Path == "" {
+		http.Error(w, `"path" is required`, http.StatusBadRequest)
+		return
+	}
+
+	// Normalize: trim trailing slashes
+	body.Path = strings.TrimRight(body.Path, "/")
+
+	// Validate path exists and is a directory
+	info, err := os.Stat(body.Path)
+	if err != nil || !info.IsDir() {
+		http.Error(w, "path must be an existing directory", http.StatusBadRequest)
+		return
+	}
+
+	ws, err := workspace.Add(body.Name, body.Path)
+	if err != nil {
+		log.Printf("handler: workspace add error: %v", err)
+		http.Error(w, fmt.Sprintf("add failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ws)
+}
+
+// handleBrowse opens a native OS folder picker and returns the selected path.
+func (r *Router) handleBrowse(w http.ResponseWriter, req *http.Request) {
+	var path string
+
+	switch runtime.GOOS {
+	case "darwin":
+		out, err := exec.Command("osascript", "-e", `POSIX path of (choose folder)`).Output()
+		if err != nil {
+			http.Error(w, "folder selection cancelled", http.StatusNoContent)
+			return
+		}
+		path = strings.TrimSpace(string(out))
+	case "linux":
+		out, err := exec.Command("zenity", "--file-selection", "--directory").Output()
+		if err != nil {
+			http.Error(w, "folder selection cancelled", http.StatusNoContent)
+			return
+		}
+		path = strings.TrimSpace(string(out))
+	default:
+		http.Error(w, "unsupported OS for folder picker", http.StatusNotImplemented)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"path": path})
+}
+
 // handleStatic serves static files from the embedded filesystem.
 // Root path / serves index.html directly. No redirects — avoids loops.
 func (r *Router) handleStatic(w http.ResponseWriter, req *http.Request) {
@@ -220,8 +309,13 @@ func (r *Router) handleStatic(w http.ResponseWriter, req *http.Request) {
 
 	info, err := fs.Stat(sub, path)
 	if err != nil || info.IsDir() {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
+		// SPA fallback: serve index.html for unknown paths
+		path = "index.html"
+		info, err = fs.Stat(sub, path)
+		if err != nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
 	}
 
 	f, err := sub.Open(path)

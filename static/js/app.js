@@ -77,10 +77,10 @@ class PiClient {
   // ── Connect / Disconnect ──
 
   /** Spawn a new agent: either fresh or resume from session path. */
-  async connectAgent(sessionPath) {
+  async connectAgent(sessionPath, cwd) {
     const body = sessionPath
       ? { type: "resume", sessionPath }
-      : { type: "new" };
+      : { type: "new", cwd: cwd || "" };
 
     const resp = await fetch("/api/connect", {
       method: "POST",
@@ -288,6 +288,22 @@ function renderMarkdown(text) {
   return marked.parse(text);
 }
 
+// ── Session URL routing ────────────────────────────────────────────────
+
+const SESSION_PATH_RE = /^\/sessions\/([0-9a-f-]{36})$/;
+
+function setSessionUrl(sessionId) {
+  if (sessionId && location.pathname !== `/sessions/${sessionId}`) {
+    history.pushState({ sessionId }, "", `/sessions/${sessionId}`);
+  }
+}
+
+function clearSessionUrl() {
+  if (location.pathname !== "/") {
+    history.replaceState(null, "", "/");
+  }
+}
+
 // ── Screen management ─────────────────────────────────────────────────
 
 function showSessionScreen() {
@@ -297,6 +313,12 @@ function showSessionScreen() {
   $("#input-area").classList.add("hidden");
   $("#queue-bar").classList.add("hidden");
   $("#btn-abort").classList.add("hidden");
+  // Reset model selector on disconnect
+  const modelSelect = $("#model-select");
+  if (modelSelect) {
+    modelSelect.classList.add("hidden");
+    modelSelect.innerHTML = '<option disabled selected>Model</option>';
+  }
 }
 
 function showChatScreen() {
@@ -1435,27 +1457,160 @@ document.addEventListener("DOMContentLoaded", () => {
     client.disconnect();
     clearChatState();
     showSessionScreen();
+    clearSessionUrl();
     loadSessions();
   });
 
   // ── New session from selection screen ──
   newSessionBtn.addEventListener("click", async () => {
-    await client.connectAgent(""); // empty = new session
+    const cwd = workspaceSelect.value;
+    await client.connectAgent("", cwd);
     showChatScreen();
     $("#messages").innerHTML = "";
     addSystemMessage("New session started");
     clearChatState();
 
-    // Load message history, token info, and check model capabilities
-    setTimeout(() => {
-      loadMessageHistory();
+    // Load message history, token info, and model list
+    setTimeout(async () => {
+      await loadMessageHistory();
       updateTokenInfo();
-    }, 500);
+      try {
+        const state = await client.getState();
+        if (state?.data?.sessionId) setSessionUrl(state.data.sessionId);
+      } catch (e) { /* ignore */ }
+      try { await loadModels(); } catch (e) { console.warn("loadModels:", e); }
+    }, 800);
+  });
+
+  // ── Workspace management ──
+  const workspaceSelect = $("#workspace-select");
+  const btnAddWorkspace = $("#btn-add-workspace");
+  const addWorkspaceForm = $("#add-workspace-form");
+  const workspaceNameInput = $("#workspace-name-input");
+  const workspacePathInput = $("#workspace-path-input");
+  const btnBrowseWorkspace = $("#btn-browse-workspace");
+  const btnSaveWorkspace = $("#btn-save-workspace");
+  const btnCancelWorkspace = $("#btn-cancel-workspace");
+
+  async function loadWorkspaces() {
+    try {
+      const resp = await fetch("/api/workspaces");
+      if (!resp.ok) return;
+      const workspaces = await resp.json();
+      renderWorkspaceDropdown(workspaces);
+    } catch (e) {
+      console.warn("loadWorkspaces:", e);
+    }
+  }
+
+  function renderWorkspaceDropdown(workspaces) {
+    workspaceSelect.innerHTML = "";
+    if (workspaces.length === 0) {
+      workspaceSelect.innerHTML = '<option disabled selected>No workspace added</option>';
+      workspaceSelect.disabled = true;
+      newSessionBtn.disabled = true;
+      return;
+    }
+
+    workspaceSelect.disabled = false;
+    workspaces.forEach(ws => {
+      const opt = document.createElement("option");
+      opt.value = ws.path;
+      opt.textContent = ws.name || ws.path.replace(/\/+$/, "").split("/").pop();
+      if (ws.is_current) opt.selected = true;
+      workspaceSelect.appendChild(opt);
+    });
+
+    newSessionBtn.disabled = false;
+  }
+
+  workspaceSelect.addEventListener("change", async () => {
+    const path = workspaceSelect.value;
+    if (!path) return;
+    try {
+      const resp = await fetch("/api/workspaces", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path }),
+      });
+      if (resp.ok) {
+        const updated = await resp.json();
+        renderWorkspaceDropdown(updated);
+      }
+    } catch (e) { /* ignore */ }
+  });
+
+  btnAddWorkspace.addEventListener("click", () => {
+    addWorkspaceForm.classList.remove("hidden");
+    workspaceNameInput.value = "";
+    workspacePathInput.value = "";
+    workspaceNameInput.focus();
+  });
+
+  btnCancelWorkspace.addEventListener("click", () => {
+    addWorkspaceForm.classList.add("hidden");
+  });
+
+  btnBrowseWorkspace.addEventListener("click", async () => {
+    try {
+      const resp = await fetch("/api/browse", { method: "POST" });
+      if (resp.status === 204) return; // cancelled
+      if (!resp.ok) return;
+      const data = await resp.json();
+      if (data.path) {
+        workspacePathInput.value = data.path;
+        if (!workspaceNameInput.value) {
+          workspaceNameInput.value = data.path.replace(/\/+$/, "").split("/").pop();
+        }
+      }
+    } catch (e) { console.warn("browse:", e); }
+  });
+
+  btnSaveWorkspace.addEventListener("click", async () => {
+    const path = workspacePathInput.value.trim();
+    if (!path) return;
+    const name = workspaceNameInput.value.trim();
+    try {
+      const resp = await fetch("/api/workspaces", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, path }),
+      });
+      if (!resp.ok) {
+        const err = await resp.text();
+        alert(err);
+        return;
+      }
+      const updated = await resp.json();
+      renderWorkspaceDropdown(updated);
+      addWorkspaceForm.classList.add("hidden");
+    } catch (e) { console.warn("save workspace:", e); }
   });
 
   // ── Load sessions on startup ──
   showSessionScreen();
   loadSessions();
+  loadWorkspaces();
+
+  // ── Auto-resume from URL or handle back/forward ──
+  const urlMatch = location.pathname.match(SESSION_PATH_RE);
+  if (urlMatch) {
+    autoResumeSession(urlMatch[1]);
+  }
+
+  window.addEventListener("popstate", (e) => {
+    if (client.connected) {
+      client.disconnect();
+      clearChatState();
+    }
+    const m = location.pathname.match(SESSION_PATH_RE);
+    if (m) {
+      autoResumeSession(m[1]);
+    } else {
+      showSessionScreen();
+      loadSessions();
+    }
+  });
 
   // ── Scroll on load ──
   scrollBottom();
@@ -1609,6 +1764,38 @@ function scheduleTokenRefresh() {
 
 // ── Session loading ───────────────────────────────────────────────────
 
+async function autoResumeSession(sessionId) {
+  try {
+    const resp = await fetch("/api/sessions");
+    if (!resp.ok) { showSessionScreen(); loadSessions(); return; }
+    const sessions = await resp.json();
+    const s = sessions.find(s => s.id === sessionId);
+    if (!s) {
+      console.warn("Session not found:", sessionId);
+      clearSessionUrl();
+      showSessionScreen();
+      loadSessions();
+      return;
+    }
+    await client.connectAgent(s.path);
+    setSessionUrl(s.id);
+    showChatScreen();
+    $("#messages").innerHTML = "";
+    addSystemMessage(`Connected to session: ${s.name}`);
+    clearChatState();
+    setTimeout(async () => {
+      await loadMessageHistory();
+      updateTokenInfo();
+      try { await loadModels(); } catch (e) { console.warn("loadModels:", e); }
+    }, 800);
+  } catch (err) {
+    console.warn("Auto-resume failed:", err);
+    clearSessionUrl();
+    showSessionScreen();
+    loadSessions();
+  }
+}
+
 async function loadSessions() {
   try {
     const resp = await fetch("/api/sessions");
@@ -1623,6 +1810,16 @@ async function loadSessions() {
       return;
     }
 
+    // Build path→name map from workspaces
+    const wsNames = {};
+    try {
+      const wsResp = await fetch("/api/workspaces");
+      if (wsResp.ok) {
+        const workspaces = await wsResp.json();
+        workspaces.forEach(ws => { wsNames[ws.path] = ws.name; });
+      }
+    } catch (e) { /* ignore */ }
+
     listContainer.classList.remove("hidden");
 
     for (const s of sessions.slice(0, 50)) { // Limit to 50 most recent
@@ -1630,8 +1827,11 @@ async function loadSessions() {
       item.className = "session-item";
       // Use first user message excerpt as the primary label; fall back to session name
       const displayLabel = s.firstUserMessage || s.name || `Session ${s.id?.slice(0, 8) || "?"}`;
-      // Show project folder basename
-      const projDir = s.cwd ? s.cwd.split("/").pop() : "";
+      // Show workspace name if matched, otherwise fall back to cwd basename
+      let projDir = "";
+      if (s.cwd) {
+        projDir = wsNames[s.cwd] || wsNames[s.cwd.replace(/\/+$/, "")] || s.cwd.replace(/\/+$/, "").split("/").pop();
+      }
       item.innerHTML = `
         <span class="session-item-name">${escapeHtml(displayLabel)}</span>
         ${projDir ? `<span class="session-item-project">${escapeHtml(projDir)}</span>` : ``}
@@ -1640,16 +1840,18 @@ async function loadSessions() {
       item.title = `${s.entries} entries, ${s.model || "unknown"}`;
       item.addEventListener("click", async () => {
         await client.connectAgent(s.path);
+        setSessionUrl(s.id);
         showChatScreen();
         $("#messages").innerHTML = "";
         addSystemMessage(`Connected to session: ${s.name}`);
         clearChatState();
 
-        // Brief pause, then load history and check model capabilities
+        // Brief pause, then load history, tokens, and model list
         setTimeout(async () => {
           await loadMessageHistory();
           updateTokenInfo();
-        }, 500);
+          try { await loadModels(); } catch (e) { console.warn("loadModels:", e); }
+        }, 800);
       });
       container.appendChild(item);
     }
@@ -1657,6 +1859,78 @@ async function loadSessions() {
     console.warn("Failed to load sessions:", err);
   }
 }
+
+// ── Model selection ───────────────────────────────────────────────────
+
+async function loadModels() {
+  const select = $("#model-select");
+  if (!select) return;
+
+  try {
+    const [resp, state] = await Promise.all([
+      client.getAvailableModels(),
+      client.getState(),
+    ]);
+    const models = resp?.data?.models;
+    if (!models || models.length === 0) return;
+
+    const currentModel = state?.data?.model;
+    const currentId = currentModel?.id || "";
+    const currentProvider = currentModel?.provider || "";
+
+    // Group models by provider
+    const groups = {};
+    for (const m of models) {
+      const p = m.provider || "unknown";
+      if (!groups[p]) groups[p] = [];
+      groups[p].push(m);
+    }
+
+    select.innerHTML = "";
+    for (const [provider, pmodels] of Object.entries(groups)) {
+      const group = document.createElement("optgroup");
+      group.label = provider;
+
+      for (const m of pmodels) {
+        const opt = document.createElement("option");
+        opt.value = `${provider}/${m.id}`;
+        opt.textContent = m.name || m.id;
+        if (provider === currentProvider && m.id === currentId) {
+          opt.selected = true;
+        }
+        group.appendChild(opt);
+      }
+      select.appendChild(group);
+    }
+
+    select.classList.remove("hidden");
+  } catch (err) {
+    console.warn("Failed to load models:", err);
+  }
+}
+
+async function switchModel(value) {
+  const [provider, ...rest] = value.split("/");
+  const modelId = rest.join("/");
+  if (!provider || !modelId) return;
+
+  try {
+    await client.setModel(provider, modelId);
+    addSystemMessage(`Switched to ${modelId} [${provider}]`);
+  } catch (err) {
+    console.warn("Failed to switch model:", err);
+  }
+}
+
+// Model select change handler
+document.addEventListener("DOMContentLoaded", () => {
+  const modelSelect = $("#model-select");
+  if (modelSelect) {
+    modelSelect.addEventListener("change", (e) => {
+      switchModel(e.target.value);
+    });
+  }
+});
 
 function timeSince(dateStr) {
   const now = new Date();

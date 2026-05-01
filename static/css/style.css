@@ -62,6 +62,8 @@ html, body {
 
 .header-left, .header-right { display: flex; align-items: center; gap: 8px; }
 
+#model-select { max-width: 200px; font-size: 0.8rem; padding: 3px 6px; }
+
 .logo { font-weight: 700; font-size: 1.1rem; color: var(--accent); margin-right: 8px; user-select: none; }
 
 select, button {
@@ -857,6 +859,98 @@ dialog#extension-modal::backdrop { background: rgba(0, 0, 0, 0.5); }
   font-size: 0.75rem;
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+/* ===== Workspace selector ===== */
+.workspace-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  max-width: 400px;
+}
+
+#workspace-select {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+#workspace-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#btn-add-workspace {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 1rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+#btn-add-workspace:hover {
+  background: var(--bg-hover);
+}
+
+#add-workspace-form {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  max-width: 500px;
+  align-items: center;
+}
+
+#workspace-name-input {
+  max-width: 120px;
+}
+
+#workspace-name-input,
+#workspace-path-input {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-family: monospace;
+}
+
+#workspace-name-input:focus,
+#workspace-path-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+#btn-browse-workspace,
+#btn-cancel-workspace {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#btn-browse-workspace:hover,
+#btn-cancel-workspace:hover {
+  background: var(--bg-hover);
+}
+
+#btn-save-workspace {
+  padding: 8px 12px;
+  font-size: 0.8rem;
 }
 
 /* ===== Utility ===== */
