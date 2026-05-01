@@ -5,7 +5,19 @@
 
 // ── Connection ID (unique per tab) ────────────────────────────────────
 
-const CONN_ID = crypto.randomUUID();
+/** Generate a UUID v4 — falls back to Math.random() for non-secure contexts (Safari on HTTP). */
+function generateUUID() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    try { return crypto.randomUUID(); } catch { /* fall through */ }
+  }
+  // Fallback: build a v4-like UUID from Math.random()
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
+const CONN_ID = generateUUID();
 
 // ── PiClient ──────────────────────────────────────────────────────────
 
@@ -158,7 +170,7 @@ class PiClient {
   }
 
   async sendAwait(type, extra = {}) {
-    const id = crypto.randomUUID();
+    const id = generateUUID();
     console.log(`[cmd] sending: ${type} id=${id}`);
     await this.send({ type, id, ...extra });
     return new Promise((resolve) => {
