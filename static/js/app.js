@@ -145,6 +145,15 @@ class PiClient {
 
   // State queries — send with id, wait for response via SSE
   async getState() { return this.sendAwait("get_state"); }
+
+  /** Wrapper that unwraps get_state response: returns { provider, model } or null. */
+  async getCurrentModel() {
+    const result = await this.getState();
+    if (!result || typeof result !== "object") return null;
+    // Support nested data shapes from Pi RPC
+    const data = result?.data || result;
+    return { provider: data.provider ?? "", model: data.model ?? "" };
+  }
   async getMessages() { return this.sendAwait("get_messages"); }
   async getSessionStats() { return this.sendAwait("get_session_stats"); }
   async getAvailableModels() { return this.sendAwait("get_available_models"); }
@@ -1461,9 +1470,18 @@ document.addEventListener("DOMContentLoaded", () => {
     addSystemMessage("New session started");
     clearChatState();
 
-    setTimeout(() => {
+    setTimeout(async () => {
       loadMessageHistory();
       updateTokenInfo();
+
+      // Query the agent for which model it auto-selected and populate the header selector
+      try {
+        const { provider, model } = await client.getCurrentModel();
+        const currentKey = (provider && model) ? `${provider}/${model}` : null;
+        populateHeaderModelSelect(availableModels, currentKey);
+      } catch (err) {
+        console.warn("[new-session] Failed to get current model:", err);
+      }
     }, 500);
   });
 
