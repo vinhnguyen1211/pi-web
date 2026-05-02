@@ -20,6 +20,7 @@
   --success: #2e7c4c;
   --radius: 10px;
   --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+  --content-width: 900px;
 }
 
 [data-theme="light"] {
@@ -131,36 +132,46 @@ body {
   overscroll-behavior: contain;
 }
 
+@media (min-width: 769px) {
+  #chat-container {
+    max-width: var(--content-width);
+    margin: 0 auto;
+  }
+}
+
 /* ===== Messages ===== */
 #messages { width: 100%; padding-bottom: 8px; }
 
 .message {
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 4px;
   padding: 12px 0;
   animation: fadeIn 0.15s ease-out;
 }
 
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
-.message.user { flex-direction: row-reverse; }
+.message.user { align-items: flex-end; }
+.message.assistant { align-items: flex-start; }
 
-.message-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.9rem;
+.message-label {
   font-weight: 700;
-  flex-shrink: 0;
+  font-size: 0.82rem;
+  user-select: none;
 }
 
-.message.user .message-avatar { background: var(--accent); color: #fff; }
-.message.assistant .message-avatar { background: var(--bg-input); color: var(--text-muted); }
+.message.user .message-label {
+  color: var(--accent);
+  padding-right: 4px;
+}
 
-.message-content { max-width: 75%; min-width: 60px; }
+.message.assistant .message-label {
+  color: var(--text-muted);
+  padding-left: 4px;
+}
+
+.message-content { max-width: 85%; min-width: 60px; }
 
 .bubble {
   display: block;
@@ -587,6 +598,14 @@ body {
 #input-row {
   display: flex;
   gap: 8px;
+  width: 100%;
+}
+
+@media (min-width: 769px) {
+  #input-row {
+    max-width: var(--content-width);
+    margin: 0 auto;
+  }
 }
 
 /* Drag-over highlight on input area */
@@ -999,8 +1018,9 @@ dialog#extension-modal::backdrop {
   /* ── Send button — larger touch target ── */
   #btn-send { width: 48px; height: 48px; }
 
-  /* ── Messages — tighter avatars and content ── */
-  .message-avatar { width: 26px; height: 26px; font-size: 0.75rem; }
+  /* ── Messages — full-width bubbles on mobile ── */
+  .message-content { max-width: 100%; width: 100%; }
+  .message-label { font-size: 0.75rem; }
   .bubble { padding: 8px 10px; }
 
   /* ── Queue items — truncate more ── */
@@ -1038,7 +1058,6 @@ dialog#extension-modal::backdrop {
   #extension-notify { right: 8px; left: 8px; max-width: none; top: 56px; }
 
   /* ── Disable tap highlight and prevent selection on interactive UI ── */
-  .message-avatar,
   .tool-header, .bash-header,
   .session-item,
   .preview-remove,
@@ -1052,8 +1071,9 @@ dialog#extension-modal::backdrop {
   #header { padding: 4px 10px; }
   .logo { font-size: 0.85rem; }
   select, button { font-size: 0.75rem; padding: 3px 6px; }
-  #chat-container { padding: 8px; }
+  #chat-container { padding: 8px; max-width: 100%; margin: 0 auto; }
+  .message-content { max-width: 100%; width: 100%; }
   .message { padding: 6px 0; }
   .bubble { padding: 8px 10px; }
-  .message-avatar { width: 24px; height: 24px; font-size: 0.7rem; }
+  .message-label { font-size: 0.7rem; }
 }

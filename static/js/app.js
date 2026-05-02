@@ -332,6 +332,7 @@ function showChatScreen() {
 
 // ── UI State ──────────────────────────────────────────────────────────
 
+let currentModelName = "π";         // Display name for the current model (used in labels)
 let assistantEl = null;             // Current streaming message .bubble element
 let currentTextEl = null;           // Current text segment receiving deltas (null when in tool/thinking block)
 let thinkingEl = null;              // Current thinking content element
@@ -654,9 +655,9 @@ function createMessage(role, content, images) {
   const div = document.createElement("div");
   div.className = `message ${role}`;
 
-  const avatar = document.createElement("div");
-  avatar.className = "message-avatar";
-  avatar.textContent = role === "user" ? "You" : "π";
+  const label = document.createElement("div");
+  label.className = `message-label ${role}`;
+  label.textContent = role === "user" ? "You" : currentModelName;
 
   const wrapper = document.createElement("div");
   wrapper.className = "message-content";
@@ -682,7 +683,7 @@ function createMessage(role, content, images) {
   }
 
   wrapper.appendChild(bubble);
-  div.appendChild(avatar);
+  div.appendChild(label);
   div.appendChild(wrapper);
 
   $("#messages").appendChild(div);
@@ -1477,6 +1478,9 @@ document.addEventListener("DOMContentLoaded", () => {
       // Query the agent for which model it auto-selected and populate the header selector
       try {
         const { provider, model } = await client.getCurrentModel();
+        if (provider && model) {
+          currentModelName = provider + "/" + model;
+        }
         const currentKey = (provider && model) ? `${provider}/${model}` : null;
         populateHeaderModelSelect(availableModels, currentKey);
       } catch (err) {
@@ -1504,9 +1508,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
       headerModelSelect.disabled = true;
       headerModelSelect.textContent = "Switching…";
+      currentModelName = `${provider}/${modelId}`;
       try {
         await client.setModel(provider, modelId);
-        addSystemMessage(`Model switched to ${provider}/${modelId}`);
+        addSystemMessage(`Model switched to ${currentModelName}`);
       } catch (err) {
         console.error("Failed to switch model:", err);
         addSystemMessage(`Failed to switch model: ${err.message}`);
@@ -1790,6 +1795,11 @@ async function loadSessions() {
           addSystemMessage(`Connected to session: ${s.name}`);
         } else {
           addSystemMessage(`New session started`);
+        }
+
+        // Set the current model name for message labels
+        if (s.provider && s.model) {
+          currentModelName = `${s.provider}/${s.model}`;
         }
 
         // Populate header model select and load history
