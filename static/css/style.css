@@ -546,7 +546,6 @@ body {
   background: var(--bg-surface);
   border-top: 1px solid var(--border);
   width: 100%;
-  padding-bottom: env(safe-area-inset-bottom, 12px); /* iOS notch home bar */
 }
 
 #prompt-input {
