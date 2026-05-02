@@ -17,6 +17,7 @@ type SessionInfo struct {
 	Path             string    `json:"path"`
 	Name             string    `json:"name,omitempty"`
 	Cwd              string    `json:"cwd,omitempty"`
+	Provider         string    `json:"provider,omitempty"`
 	Model            string    `json:"model,omitempty"`
 	Entries          int       `json:"entries"`
 	ModTime          time.Time `json:"modTime"`
@@ -26,7 +27,7 @@ type SessionInfo struct {
 // Header is the first line of a Pi session .jsonl file.
 type Header struct {
 	ID    string `json:"id"`
-	Model string `json:"model"`
+	Model string `json:"model,omitempty"`
 	Name  string `json:"name,omitempty"`
 	Cwd   string `json:"cwd"`
 }
@@ -84,18 +85,38 @@ func readSession(path string) SessionInfo {
 	// Default MaxScanTokenSize is 64KB; images in messages routinely exceed that.
 	scanner.Buffer(make([]byte, 1024), 5*1024*1024) // up to 5 MB per line
 
-	// Read first line for header
+	var provider string
+	var modelId string
+	var entryCount int
+	var firstUserMessage string
+
+	// Read first line for session header (metadata like id, name, cwd)
 	if scanner.Scan() {
 		if err := json.Unmarshal(scanner.Bytes(), &header); err != nil {
 			return SessionInfo{}
 		}
 	}
 
-	// Count remaining lines as entries; also find the first user message
-	entryCount := 0
-	var firstUserMessage string
+	// Process remaining lines — extract model_change (last wins), count entries, find first user message
 	for scanner.Scan() {
 		entryCount++
+
+		// Check if this is a model_change entry — keep overwriting so the last one wins
+		var mc struct {
+			Type     string `json:"type"`
+			Provider string `json:"provider"`
+			ModelId  string `json:"modelId"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &mc); err == nil && mc.Type == "model_change" {
+			if mc.Provider != "" {
+				provider = mc.Provider
+			}
+			if mc.ModelId != "" {
+				modelId = mc.ModelId
+			}
+		}
+
+		// Capture the first user message (skip non-message lines like model_change)
 		if firstUserMessage == "" {
 			firstUserMessage = extractFirstUserMessage(scanner.Bytes())
 		}
@@ -111,7 +132,8 @@ func readSession(path string) SessionInfo {
 		Path:             path,
 		Name:             displayName,
 		Cwd:              header.Cwd,
-		Model:            header.Model,
+		Provider:         provider,
+		Model:            modelId,
 		Entries:          entryCount,
 		ModTime:          info.ModTime(),
 		FirstUserMessage: firstUserMessage,

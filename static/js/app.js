@@ -1807,7 +1807,8 @@ async function loadSessions() {
           <span class="session-item-meta">${timeSince(s.modTime)}</span>
         </div>
       `;
-      item.title = hasAgent ? `${s.entries} entries, ${s.model || "unknown"} — agent alive` : `${s.entries} entries, ${s.model || "unknown"}`;
+      const modelDisplay = s.provider && s.model ? `${s.provider}/${s.model}` : (s.model || "unknown");
+      item.title = hasAgent ? `${s.entries} entries, ${modelDisplay} — agent alive` : `${s.entries} entries, ${modelDisplay}`;
 
       const sessionData = s;
       item.addEventListener("click", async () => {
@@ -1822,7 +1823,7 @@ async function loadSessions() {
         }
 
         // Populate header model select and load history
-        const currentModel = s.model ? `${s.model}` : null;
+        const currentModel = (s.provider && s.model) ? `${s.provider}/${s.model}` : null;
         populateHeaderModelSelect(availableModels, currentModel);
         setTimeout(async () => {
           await loadMessageHistory();
