@@ -47,12 +47,20 @@ func New(cwd string) *Manager {
 //   - connID: unique connection identifier
 //   - sessionPath: optional path to an existing session .jsonl file
 //   - folderPath: optional explicit working directory (overrides session CWD and fallback)
-func (m *Manager) Spawn(connID, sessionPath, folderPath string) (*agent.Agent, error) {
+//   - provider: optional model provider name (passed as --provider flag)
+//   - model: optional model pattern or ID (passed as --model flag)
+func (m *Manager) Spawn(connID, sessionPath, folderPath, provider, model string) (*agent.Agent, error) {
 	cwd := m.resolveCWD(sessionPath, folderPath)
 
 	args := []string{"--mode", "rpc"}
 	if sessionPath != "" {
 		args = append(args, "--session", sessionPath)
+	}
+	if provider != "" {
+		args = append(args, "--provider", provider)
+	}
+	if model != "" {
+		args = append(args, "--model", model)
 	}
 
 	a, err := agent.New(cwd, args...)

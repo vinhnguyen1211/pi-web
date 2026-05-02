@@ -718,6 +718,17 @@ dialog#extension-modal::backdrop {
   font-family: var(--font-mono);
 }
 
+#folder-model-select {
+  width: 100%;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 0.9rem;
+  margin-top: 4px;
+}
+
 #btn-browse-folder {
   margin-top: 8px;
   font-size: 0.85rem;
@@ -748,6 +759,52 @@ dialog#extension-modal::backdrop {
 }
 
 @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* ===== Model selector on session screen ===== */
+#model-selector-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 2px;
+}
+
+#model-selector-wrapper label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  min-width: fit-content;
+}
+
+#model-select {
+  flex: 1;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 0.9rem;
+}
+
+#model-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ===== Header model select ===== */
+#header-model-select {
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.78rem;
+  max-width: 200px;
+}
+
+#header-model-select:hover {
+  border-color: var(--accent);
+}
 
 /* ===== Session selection screen ===== */
 #session-screen {

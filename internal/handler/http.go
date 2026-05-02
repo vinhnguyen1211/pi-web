@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bufio"
 	"bytes"
 	"embed"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -54,6 +56,9 @@ func (r *Router) ServeMux() http.Handler {
 	// List sessions with alive background agents
 	mux.HandleFunc("GET /api/active-agents", r.handleActiveAgents)
 
+	// List available models
+	mux.HandleFunc("GET /api/models", r.handleModels)
+
 	// Open a project folder (v2 feature)
 	mux.HandleFunc("POST /api/open-folder", r.handleOpenFolder)
 
@@ -77,6 +82,8 @@ func (r *Router) handleConnect(w http.ResponseWriter, req *http.Request) {
 		Type        string `json:"type"`
 		SessionPath string `json:"sessionPath,omitempty"`
 		FolderPath  string `json:"folderPath,omitempty"`
+		Provider    string `json:"provider,omitempty"`
+		Model       string `json:"model,omitempty"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
@@ -96,7 +103,7 @@ func (r *Router) handleConnect(w http.ResponseWriter, req *http.Request) {
 		sessionPath = body.SessionPath
 	}
 
-	a, err := r.mgr.Spawn(connID, sessionPath, body.FolderPath)
+	a, err := r.mgr.Spawn(connID, sessionPath, body.FolderPath, body.Provider, body.Model)
 	if err != nil {
 		log.Printf("handler: connect error: %v", err)
 		http.Error(w, fmt.Sprintf("spawn failed: %v", err), http.StatusInternalServerError)
@@ -109,6 +116,8 @@ func (r *Router) handleConnect(w http.ResponseWriter, req *http.Request) {
 		"connId":    connID,
 		"pid":       a.PID(),
 		"folderPath": body.FolderPath,
+		"provider":   body.Provider,
+		"model":      body.Model,
 	})
 }
 
@@ -273,6 +282,79 @@ func (r *Router) handleActiveAgents(w http.ResponseWriter, req *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{
 		"active": active,
 	})
+}
+
+// Model represents an available AI model from `pi --list-models`.
+type Model struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	Context  string `json:"context,omitempty"`
+	MaxOut   string `json:"maxOut,omitempty"`
+	Thinking bool   `json:"thinking"`
+	Images   bool   `json:"images"`
+}
+
+// handleModels lists available models by running `pi --list-models`.
+func (r *Router) handleModels(w http.ResponseWriter, req *http.Request) {
+	cmd := exec.Command("pi", "--list-models")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("handler: list-models error: %v (%s)", err, output)
+		http.Error(w, fmt.Sprintf("failed to list models: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	models := parseModelsOutput(string(output))
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(models)
+}
+
+// parseModelsOutput parses the tabular output of `pi --list-models`.
+// Format:
+//   provider   model       context  max-out  thinking  images
+//   llama.cpp  qwen-local  128K     16.4K    no        no
+func parseModelsOutput(raw string) []Model {
+	var models []Model
+	scanner := bufio.NewScanner(strings.NewReader(raw))
+	headerLine := true
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if headerLine {
+			headerLine = false
+			continue // skip the header row
+		}
+
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+
+		m := Model{
+			Provider: fields[0],
+			Model:    fields[1],
+		}
+		if len(fields) > 2 {
+			m.Context = fields[2]
+		}
+		if len(fields) > 3 {
+			m.MaxOut = fields[3]
+		}
+		if len(fields) > 4 {
+			m.Thinking = strings.EqualFold(fields[4], "yes") || strings.EqualFold(fields[4], "true")
+		}
+		if len(fields) > 5 {
+			m.Images = strings.EqualFold(fields[5], "yes") || strings.EqualFold(fields[5], "true")
+		}
+
+		models = append(models, m)
+	}
+
+	return models
 }
 
 // handleStatic serves static files from the embedded filesystem.

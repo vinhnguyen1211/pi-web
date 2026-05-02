@@ -78,14 +78,23 @@ class PiClient {
 
   /** Spawn a new agent: either fresh or resume from session path.
    *  @param {string} sessionPath - Optional session .jsonl path for resuming
-   *  @param {string} [folderPath] - Optional folder to set as working directory
+   *  @param {Object} [options] - Optional settings
+   *  @param {string} [options.folderPath] - Optional folder to set as working directory
+   *  @param {string} [options.provider] - Model provider name
+   *  @param {string} [options.model] - Model pattern or ID
    */
-  async connectAgent(sessionPath, folderPath) {
+  async connectAgent(sessionPath, options = {}) {
     const body = sessionPath
       ? { type: "resume", sessionPath }
       : { type: "new" };
-    if (folderPath) {
-      body.folderPath = folderPath;
+    if (options.folderPath) {
+      body.folderPath = options.folderPath;
+    }
+    if (options.provider) {
+      body.provider = options.provider;
+    }
+    if (options.model) {
+      body.model = options.model;
     }
 
     const resp = await fetch("/api/connect", {
@@ -1445,14 +1454,23 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // ── New session from selection screen ──
+  const modelSelect = $("#model-select");
   newSessionBtn.addEventListener("click", async () => {
-    await client.connectAgent(""); // empty = new session
+    const selectedOption = modelSelect.selectedOptions[0];
+    const provider = selectedOption ? selectedOption.dataset.provider : "";
+    const model = selectedOption ? selectedOption.value : "";
+    await client.connectAgent("", { provider, model });
     showChatScreen();
     $("#messages").innerHTML = "";
-    addSystemMessage("New session started");
+    if (provider && model) {
+      addSystemMessage(`New session started (${provider}/${model})`);
+    } else {
+      addSystemMessage("New session started");
+    }
     clearChatState();
 
-    // Load message history, token info, and check model capabilities
+    // Populate header model select and load message history
+    populateHeaderModelSelect(availableModels, provider && model ? `${provider}/${model}` : null);
     setTimeout(() => {
       loadMessageHistory();
       updateTokenInfo();
@@ -1467,8 +1485,33 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // ── Load sessions on startup ──
+  // ── Header model select (switch model while connected) ──
+  const headerModelSelect = $("#header-model-select");
+  if (headerModelSelect) {
+    headerModelSelect.addEventListener("change", async () => {
+      const selectedOption = headerModelSelect.selectedOptions[0];
+      const provider = selectedOption ? selectedOption.dataset.provider : "";
+      const modelId = selectedOption ? selectedOption.value : "";
+      if (!provider || !modelId) return;
+
+      headerModelSelect.disabled = true;
+      headerModelSelect.textContent = "Switching…";
+      try {
+        await client.setModel(provider, modelId);
+        addSystemMessage(`Model switched to ${provider}/${modelId}`);
+      } catch (err) {
+        console.error("Failed to switch model:", err);
+        addSystemMessage(`Failed to switch model: ${err.message}`);
+      } finally {
+        headerModelSelect.disabled = false;
+        populateHeaderModelSelect(availableModels, `${provider}/${modelId}`);
+      }
+    });
+  }
+
+  // ── Load models and sessions on startup ──
   showSessionScreen();
+  loadModels();
   loadSessions();
 
   // ── Scroll on load ──
@@ -1621,6 +1664,92 @@ function scheduleTokenRefresh() {
   tokenUpdateTimer = setTimeout(poll, BASE_DELAY);
 }
 
+// ── Model list ────────────────────────────────────────────────────────
+
+let availableModels = []; // Array of { provider, model, context, maxOut, thinking, images }
+
+/** Fetch available models from the server and populate the session-screen dropdown. */
+async function loadModels() {
+  try {
+    const resp = await fetch("/api/models");
+    if (!resp.ok) return;
+    availableModels = await resp.json();
+    console.log("[models] loaded:", availableModels);
+
+    const select = $("#model-select");
+    select.innerHTML = "";
+    select.disabled = false;
+
+    if (availableModels.length === 0) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "No models available";
+      select.appendChild(opt);
+      return;
+    }
+
+    // Group by provider for a cleaner display
+    let lastProvider = "";
+    for (const m of availableModels) {
+      if (m.provider !== lastProvider) {
+        const group = document.createElement("optgroup");
+        group.label = m.provider;
+        select.appendChild(group);
+        lastProvider = m.provider;
+      }
+      const opt = document.createElement("option");
+      opt.value = m.model;
+      opt.dataset.provider = m.provider;
+
+      // Build label: model name + optional features
+      let label = m.model;
+      if (m.thinking) label += " ⚡";  // thinking capable
+      if (m.images) label += " 🖼";    // vision capable
+      opt.textContent = label;
+
+      select.lastChild.appendChild(opt);
+    }
+  } catch (err) {
+    console.warn("Failed to load models:", err);
+    const select = $("#model-select");
+    if (select) {
+      select.innerHTML = '<option value="">Failed to load</option>';
+    }
+  }
+}
+
+/** Populate the header model <select> with available models.
+ * @param {Array} models - Array of model objects
+ * @param {string} [currentKey] - Current "provider/model" string to pre-select
+ */
+function populateHeaderModelSelect(models, currentKey) {
+  const select = $("#header-model-select");
+  if (!select || !models.length) return;
+
+  select.innerHTML = "";
+
+  let lastProvider = "";
+  for (const m of models) {
+    if (m.provider !== lastProvider) {
+      const group = document.createElement("optgroup");
+      group.label = m.provider;
+      select.appendChild(group);
+      lastProvider = m.provider;
+    }
+    const opt = document.createElement("option");
+    opt.value = m.model;
+    opt.dataset.provider = m.provider;
+    opt.textContent = m.model;
+
+    // Pre-select the current model
+    if (currentKey && `${m.provider}/${m.model}` === currentKey) {
+      opt.selected = true;
+    }
+
+    select.lastChild.appendChild(opt);
+  }
+}
+
 // ── Session loading ───────────────────────────────────────────────────
 
 async function loadSessions() {
@@ -1692,7 +1821,9 @@ async function loadSessions() {
           addSystemMessage(`New session started`);
         }
 
-        // Brief pause, then load history and check model capabilities
+        // Populate header model select and load history
+        const currentModel = s.model ? `${s.model}` : null;
+        populateHeaderModelSelect(availableModels, currentModel);
         setTimeout(async () => {
           await loadMessageHistory();
           updateTokenInfo();
@@ -1742,8 +1873,20 @@ function showFolderPicker() {
 
   titleEl.textContent = "Open Project Folder";
   messageEl.textContent = "Enter the path to a project directory on this computer";
+
+  // Build model options HTML (mirrors session screen selector)
+  let modelOptionsHtml = '<option value="">Default</option>';
+  for (const m of availableModels) {
+    const label = `${m.model}${m.thinking ? " ⚡" : ""}${m.images ? " 🖼" : ""}`;
+    modelOptionsHtml += `<option value="${m.model}" data-provider="${m.provider}">${label}</option>`;
+  }
+
   bodyEl.innerHTML = `
     <input type="text" id="folder-path-input" placeholder="/home/user/projects/my-app" autofocus>
+    <div style="margin-top:10px;">
+      <label for="folder-model-select" style="font-size:0.85rem;color:var(--text-muted);">Model:</label>
+      <select id="folder-model-select">${modelOptionsHtml}</select>
+    </div>
     <div id="folder-error" class="hidden"></div>
   `;
 
@@ -1766,6 +1909,11 @@ function showFolderPicker() {
     confirmBtn.disabled = true;
     confirmBtn.textContent = "Connecting…";
 
+    const modelSelect = $("#folder-model-select");
+    const selectedOpt = modelSelect.selectedOptions[0];
+    const provider = selectedOpt ? selectedOpt.dataset.provider || "" : "";
+    const modelName = selectedOpt ? selectedOpt.value : "";
+
     try {
       const resp = await fetch("/api/connect", {
         method: "POST",
@@ -1776,6 +1924,8 @@ function showFolderPicker() {
         body: JSON.stringify({
           type: "new",
           folderPath: path,
+          provider,
+          model: modelName,
         }),
       });
 
@@ -1798,9 +1948,14 @@ function showFolderPicker() {
       clearChatState();
 
       const folderName = path.split("/").filter(Boolean).pop();
-      addSystemMessage(`Opened project: ${folderName}`);
+      if (provider && modelName) {
+        addSystemMessage(`Opened project: ${folderName} (${provider}/${modelName})`);
+      } else {
+        addSystemMessage(`Opened project: ${folderName}`);
+      }
 
-      // Load message history and token info
+      // Populate header model select and load history
+      populateHeaderModelSelect(availableModels, provider && modelName ? `${provider}/${modelName}` : null);
       setTimeout(() => {
         loadMessageHistory();
         updateTokenInfo();
