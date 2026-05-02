@@ -51,6 +51,9 @@ func (r *Router) ServeMux() http.Handler {
 	// List reusable sessions
 	mux.HandleFunc("GET /api/sessions", r.handleSessions)
 
+	// List sessions with alive background agents
+	mux.HandleFunc("GET /api/active-agents", r.handleActiveAgents)
+
 	// Open a project folder (v2 feature)
 	mux.HandleFunc("POST /api/open-folder", r.handleOpenFolder)
 
@@ -117,10 +120,14 @@ func (r *Router) handleStream(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Ensure cleanup when client disconnects
-	defer r.mgr.Remove(connID)
+	// Deregister keeps agent alive in background (killed after 5 min inactivity)
+	defer func() {
+		log.Printf("handler: SSE disconnected, deregistering connId=%s", connID)
+		r.mgr.Deregister(connID)
+	}()
 
 	a := r.mgr.Get(connID)
+	log.Printf("handler: SSE stream opened for connId=%s, agent exists=%v", connID, a != nil)
 	if a == nil {
 		// No agent for this connection yet — tell client to pick a session
 		flusher := w.(http.Flusher)
@@ -201,6 +208,9 @@ func (r *Router) handleCommand(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Reset inactivity timer on each command
+	r.mgr.Touch(connID)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, `{"ok":true}`)
@@ -254,6 +264,15 @@ func (r *Router) handleSessions(w http.ResponseWriter, req *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(sessions)
+}
+
+// handleActiveAgents returns session paths that have alive background agents.
+func (r *Router) handleActiveAgents(w http.ResponseWriter, req *http.Request) {
+	active := r.mgr.ActiveSessions()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"active": active,
+	})
 }
 
 // handleStatic serves static files from the embedded filesystem.

@@ -9,14 +9,17 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Agent wraps a single `pi --mode rpc` subprocess.
 type Agent struct {
-	cmd   *exec.Cmd
-	stdin io.WriteCloser
-	lines chan string // buffered channel for stdout JSONL lines
-	done  chan struct{} // closed when the stdout goroutine exits
+	cmd          *exec.Cmd
+	stdin        io.WriteCloser
+	lines        chan string  // buffered channel for stdout JSONL lines
+	done         chan struct{} // closed when the stdout goroutine exits
+	sessionPath  string        // path to the session .jsonl file (empty for new sessions)
+	lastActivity time.Time     // last time this agent had an active connection or command
 }
 
 // New spawns pi in RPC mode and returns an Agent.
@@ -54,10 +57,18 @@ func New(cwd string, args ...string) (*Agent, error) {
 	}
 
 	a := &Agent{
-		cmd:   cmd,
-		stdin: stdin,
-		lines: lines,
-		done:  make(chan struct{}),
+		cmd:          cmd,
+		stdin:        stdin,
+		lines:        lines,
+		done:         make(chan struct{}),
+		lastActivity: time.Now(),
+	}
+
+	// Extract session path from args if present
+	for i, arg := range args {
+		if arg == "--session" && i+1 < len(args) {
+			a.sessionPath = args[i+1]
+		}
 	}
 
 	// Tail stderr in background
@@ -167,4 +178,29 @@ func (a *Agent) PID() int {
 		return 0
 	}
 	return a.cmd.Process.Pid
+}
+
+// SessionPath returns the session file path this agent is bound to.
+func (a *Agent) SessionPath() string {
+	return a.sessionPath
+}
+
+// Touch resets the last-activity timestamp.
+func (a *Agent) Touch() {
+	a.lastActivity = time.Now()
+}
+
+// TimeSinceActivity returns how long it has been since the last activity.
+func (a *Agent) TimeSinceActivity() time.Duration {
+	return time.Since(a.lastActivity)
+}
+
+// IsAlive sends signal 0 to check if the process is still running.
+// Returns true if alive, false if dead or no process.
+func (a *Agent) IsAlive() bool {
+	if a.cmd.Process == nil {
+		return false
+	}
+	// Signal 0 is a no-op that checks process existence
+	return a.cmd.Process.Signal(nil) == nil
 }

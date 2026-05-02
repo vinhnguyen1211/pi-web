@@ -1625,9 +1625,19 @@ function scheduleTokenRefresh() {
 
 async function loadSessions() {
   try {
-    const resp = await fetch("/api/sessions");
-    if (!resp.ok) return;
-    const sessions = await resp.json();
+    const [sessionsResp, activeResp] = await Promise.all([
+      fetch("/api/sessions"),
+      fetch("/api/active-agents"),
+    ]);
+    if (!sessionsResp.ok) return;
+
+    const sessions = await sessionsResp.json();
+    let activePaths = {};
+    if (activeResp.ok) {
+      const activeData = await activeResp.json();
+      activePaths = activeData.active || {};
+    }
+
     const container = $("#session-list");
     const listContainer = $("#session-list-container");
     container.innerHTML = "";
@@ -1640,24 +1650,47 @@ async function loadSessions() {
     listContainer.classList.remove("hidden");
 
     for (const s of sessions.slice(0, 50)) { // Limit to 50 most recent
+      const hasAgent = activePaths[s.path];
       const item = document.createElement("div");
       item.className = "session-item";
+
       // Use first user message excerpt as the primary label; fall back to session name
       const displayLabel = s.firstUserMessage || s.name || `Session ${s.id?.slice(0, 8) || "?"}`;
       // Show project folder basename
       const projDir = s.cwd ? s.cwd.split("/").pop() : "";
+
+      let agentIndicator = "";
+      if (hasAgent) {
+        agentIndicator = `
+          <span class="session-item-active-badge">
+            <span class="active-dot"></span>
+            <span>Agent alive</span>
+          </span>`;
+      }
+
       item.innerHTML = `
-        <span class="session-item-name">${escapeHtml(displayLabel)}</span>
-        ${projDir ? `<span class="session-item-project">${escapeHtml(projDir)}</span>` : ``}
-        <span class="session-item-meta">${timeSince(s.modTime)}</span>
+        <div class="session-item-header">
+          <span class="session-item-name">${escapeHtml(displayLabel)}</span>
+          ${agentIndicator}
+        </div>
+        <div class="session-item-row">
+          ${projDir ? `<span class="session-item-project">${escapeHtml(projDir)}</span>` : ``}
+          <span class="session-item-meta">${timeSince(s.modTime)}</span>
+        </div>
       `;
-      item.title = `${s.entries} entries, ${s.model || "unknown"}`;
+      item.title = hasAgent ? `${s.entries} entries, ${s.model || "unknown"} — agent alive` : `${s.entries} entries, ${s.model || "unknown"}`;
+
+      const sessionData = s;
       item.addEventListener("click", async () => {
-        await client.connectAgent(s.path);
+        await client.connectAgent(sessionData.path);
         showChatScreen();
         $("#messages").innerHTML = "";
-        addSystemMessage(`Connected to session: ${s.name}`);
         clearChatState();
+        if (hasAgent) {
+          addSystemMessage(`Connected to session: ${s.name}`);
+        } else {
+          addSystemMessage(`New session started`);
+        }
 
         // Brief pause, then load history and check model capabilities
         setTimeout(async () => {

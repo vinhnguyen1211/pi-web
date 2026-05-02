@@ -8,28 +8,38 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"piweb/internal/agent"
 )
 
+// inactivityTimeout is how long to keep a background agent alive after
+// the last client disconnects. After this period with no active connection
+// or command, the agent is killed.
+const inactivityTimeout = 5 * time.Minute
+
 // Manager tracks per-connection Pi agent instances.
 type Manager struct {
 	mu         sync.RWMutex
-	agents     map[string]*agent.Agent // connId -> Agent
-	cwd        string                  // fallback default CWD (process dir)
-	sessionCwd map[string]string       // sessionPath -> working directory for that session
-	connFolder map[string]string       // connId -> folderPath (current open folder)
+	agents     map[string]*agent.Agent       // connId -> Agent (actively connected)
+	inactive   map[string]*agent.Agent       // connId -> Agent (disconnected but alive, keyed by original connId)
+	cwd        string                        // fallback default CWD (process dir)
+	sessionCwd map[string]string             // sessionPath -> working directory for that session
+	connFolder map[string]string             // connId -> folderPath (current open folder)
 }
 
 // New creates a new Manager with the given fallback working directory.
 // Agents opened without an explicit folder will use this as their CWD.
 func New(cwd string) *Manager {
-	return &Manager{
+	m := &Manager{
 		agents:     make(map[string]*agent.Agent),
+		inactive:   make(map[string]*agent.Agent),
 		cwd:        cwd,
 		sessionCwd: make(map[string]string),
 		connFolder: make(map[string]string),
 	}
+	m.StartSweep(60 * time.Second)
+	return m
 }
 
 // Spawn creates a new pi agent subprocess for the given connection.
@@ -51,6 +61,14 @@ func (m *Manager) Spawn(connID, sessionPath, folderPath string) (*agent.Agent, e
 	}
 
 	m.mu.Lock()
+
+	// If an inactive agent exists for this connId (same tab reconnected), kill it
+	if old, ok := m.inactive[connID]; ok {
+		delete(m.inactive, connID)
+		log.Printf("manager: spawn — replacing inactive agent from same connId (PID %d → %d)", old.PID(), a.PID())
+		_ = old.Kill()
+	}
+
 	m.agents[connID] = a
 	if folderPath != "" {
 		m.connFolder[connID] = folderPath
@@ -146,12 +164,50 @@ func (m *Manager) Get(connID string) *agent.Agent {
 	return m.agents[connID]
 }
 
-// Remove kills and removes the agent for the given connection ID.
+// Deregister moves the agent from active to inactive when a client disconnects.
+// The agent stays alive in the background and is killed after inactivityTimeout.
+func (m *Manager) Deregister(connID string) {
+	m.mu.Lock()
+	a, ok := m.agents[connID]
+	if ok {
+		delete(m.agents, connID)
+		delete(m.connFolder, connID)
+	}
+	m.mu.Unlock()
+
+	if !ok || a == nil {
+		return
+	}
+
+	sp := a.SessionPath()
+	folder := m.getFolder(connID)
+
+	// Move to inactive — keyed by connId so Spawn can replace the same tab's agent
+	m.mu.Lock()
+	if old, exists := m.inactive[connID]; exists {
+		delete(m.inactive, connID)
+		m.mu.Unlock()
+		log.Printf("manager: deregister — replacing existing inactive agent for connId (PID %d → %d)", old.PID(), a.PID())
+		_ = old.Kill()
+	}
+	m.inactive[connID] = a
+	m.mu.Unlock()
+
+	if sp != "" {
+		log.Printf("manager: deregister connId=%s → inactive (session=%q, PID=%d)", connID, sp, a.PID())
+	} else {
+		log.Printf("manager: deregister connId=%s → inactive (new session, folder=%q, PID=%d)", connID, folder, a.PID())
+	}
+}
+
+// Remove kills and removes the agent for the given connection ID immediately.
+// Use Deregister for normal SSE disconnect; use Remove only for explicit kill.
 func (m *Manager) Remove(connID string) {
 	m.mu.Lock()
 	a, ok := m.agents[connID]
 	if ok {
 		delete(m.agents, connID)
+		delete(m.connFolder, connID)
 	}
 	m.mu.Unlock()
 
@@ -163,15 +219,97 @@ func (m *Manager) Remove(connID string) {
 	}
 }
 
-// Cleanup kills all tracked agents.
-func (m *Manager) Cleanup() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for id, a := range m.agents {
-		log.Printf("manager: cleanup agent %s", id)
-		if err := a.Kill(); err != nil {
-			log.Printf("manager: error killing agent %s: %v", id, err)
+// Touch updates the last-activity timestamp for the agent connected to connID.
+func (m *Manager) Touch(connID string) {
+	m.mu.RLock()
+	a := m.agents[connID]
+	m.mu.RUnlock()
+	if a != nil {
+		a.Touch()
+	}
+}
+
+// ActiveSessions returns the set of session paths that have an alive background agent.
+func (m *Manager) ActiveSessions() map[string]bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	result := make(map[string]bool)
+
+	// Active agents with session paths
+	for _, a := range m.agents {
+		if sp := a.SessionPath(); sp != "" {
+			result[sp] = true
 		}
 	}
+
+	// Inactive agents (all have connId as key, but show session path or folder)
+	for _, a := range m.inactive {
+		if a.IsAlive() {
+			if sp := a.SessionPath(); sp != "" {
+				result[sp] = true
+			}
+		}
+	}
+
+	return result
+}
+
+// Sweep kills inactive agents that have been idle longer than inactivityTimeout
+// or are no longer alive.
+func (m *Manager) Sweep() {
+	m.mu.Lock()
+	var toKill []*agent.Agent
+	for connID, a := range m.inactive {
+		if !a.IsAlive() || a.TimeSinceActivity() > inactivityTimeout {
+			toKill = append(toKill, a)
+			log.Printf("manager: sweep — killing inactive agent connId=%s (PID=%d, idle=%v)",
+				connID, a.PID(), a.TimeSinceActivity())
+			delete(m.inactive, connID)
+		}
+	}
+	m.mu.Unlock()
+
+	for _, a := range toKill {
+		_ = a.Kill()
+	}
+}
+
+// StartSweep runs a background goroutine that periodically sweeps inactive agents.
+func (m *Manager) StartSweep(interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			m.Sweep()
+		}
+	}()
+}
+
+// getFolder is a helper to safely read connFolder under the lock.
+func (m *Manager) getFolder(connID string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.connFolder[connID]
+}
+
+// Cleanup kills all tracked agents (active and inactive).
+func (m *Manager) Cleanup() {
+	m.mu.Lock()
+	allAgents := make([]*agent.Agent, 0, len(m.agents)+len(m.inactive))
+	for _, a := range m.agents {
+		allAgents = append(allAgents, a)
+	}
+	for _, a := range m.inactive {
+		allAgents = append(allAgents, a)
+	}
 	m.agents = make(map[string]*agent.Agent)
+	m.inactive = make(map[string]*agent.Agent)
+	m.mu.Unlock()
+
+	for _, a := range allAgents {
+		if err := a.Kill(); err != nil {
+			log.Printf("manager: error killing agent (PID %d): %v", a.PID(), err)
+		}
+	}
 }

@@ -895,6 +895,44 @@ dialog#extension-modal::backdrop {
   white-space: nowrap;
 }
 
+.session-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.session-item-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Active agent badge */
+.session-item-active-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.7rem;
+  color: var(--success);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.active-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  animation: pulse-active 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-active {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
 /* ===== Utility ===== */
 .hidden { display: none !important; }
 
