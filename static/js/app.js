@@ -1454,23 +1454,13 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // ── New session from selection screen ──
-  const modelSelect = $("#model-select");
   newSessionBtn.addEventListener("click", async () => {
-    const selectedOption = modelSelect.selectedOptions[0];
-    const provider = selectedOption ? selectedOption.dataset.provider : "";
-    const model = selectedOption ? selectedOption.value : "";
-    await client.connectAgent("", { provider, model });
+    await client.connectAgent("");
     showChatScreen();
     $("#messages").innerHTML = "";
-    if (provider && model) {
-      addSystemMessage(`New session started (${provider}/${model})`);
-    } else {
-      addSystemMessage("New session started");
-    }
+    addSystemMessage("New session started");
     clearChatState();
 
-    // Populate header model select and load message history
-    populateHeaderModelSelect(availableModels, provider && model ? `${provider}/${model}` : null);
     setTimeout(() => {
       loadMessageHistory();
       updateTokenInfo();
@@ -1511,7 +1501,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ── Load models and sessions on startup ──
   showSessionScreen();
-  loadModels();
+  loadModelsWithoutSelection();
   loadSessions();
 
   // ── Scroll on load ──
@@ -1668,53 +1658,15 @@ function scheduleTokenRefresh() {
 
 let availableModels = []; // Array of { provider, model, context, maxOut, thinking, images }
 
-/** Fetch available models from the server and populate the session-screen dropdown. */
-async function loadModels() {
+/** Fetch available models from the server and cache them for later use. */
+async function loadModelsWithoutSelection() {
   try {
     const resp = await fetch("/api/models");
     if (!resp.ok) return;
     availableModels = await resp.json();
     console.log("[models] loaded:", availableModels);
-
-    const select = $("#model-select");
-    select.innerHTML = "";
-    select.disabled = false;
-
-    if (availableModels.length === 0) {
-      const opt = document.createElement("option");
-      opt.value = "";
-      opt.textContent = "No models available";
-      select.appendChild(opt);
-      return;
-    }
-
-    // Group by provider for a cleaner display
-    let lastProvider = "";
-    for (const m of availableModels) {
-      if (m.provider !== lastProvider) {
-        const group = document.createElement("optgroup");
-        group.label = m.provider;
-        select.appendChild(group);
-        lastProvider = m.provider;
-      }
-      const opt = document.createElement("option");
-      opt.value = m.model;
-      opt.dataset.provider = m.provider;
-
-      // Build label: model name + optional features
-      let label = m.model;
-      if (m.thinking) label += " ⚡";  // thinking capable
-      if (m.images) label += " 🖼";    // vision capable
-      opt.textContent = label;
-
-      select.lastChild.appendChild(opt);
-    }
   } catch (err) {
     console.warn("Failed to load models:", err);
-    const select = $("#model-select");
-    if (select) {
-      select.innerHTML = '<option value="">Failed to load</option>';
-    }
   }
 }
 
