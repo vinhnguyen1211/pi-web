@@ -134,6 +134,7 @@ body {
 
 @media (min-width: 769px) {
   #chat-container {
+    width: 100%;
     max-width: var(--content-width);
     margin: 0 auto;
   }
@@ -602,6 +603,7 @@ body {
 
 @media (min-width: 769px) {
   #input-row {
+    width: 100%;
     max-width: var(--content-width);
     margin: 0 auto;
   }
