@@ -1860,19 +1860,8 @@ function showFolderPicker() {
   titleEl.textContent = "Open Project Folder";
   messageEl.textContent = "Enter the path to a project directory on this computer";
 
-  // Build model options HTML (mirrors session screen selector)
-  let modelOptionsHtml = '<option value="">Default</option>';
-  for (const m of availableModels) {
-    const label = `${m.model}${m.thinking ? " ⚡" : ""}${m.images ? " 🖼" : ""}`;
-    modelOptionsHtml += `<option value="${m.model}" data-provider="${m.provider}">${label}</option>`;
-  }
-
   bodyEl.innerHTML = `
     <input type="text" id="folder-path-input" placeholder="/home/user/projects/my-app" autofocus>
-    <div style="margin-top:10px;">
-      <label for="folder-model-select" style="font-size:0.85rem;color:var(--text-muted);">Model:</label>
-      <select id="folder-model-select">${modelOptionsHtml}</select>
-    </div>
     <div id="folder-error" class="hidden"></div>
   `;
 
@@ -1895,11 +1884,6 @@ function showFolderPicker() {
     confirmBtn.disabled = true;
     confirmBtn.textContent = "Connecting…";
 
-    const modelSelect = $("#folder-model-select");
-    const selectedOpt = modelSelect.selectedOptions[0];
-    const provider = selectedOpt ? selectedOpt.dataset.provider || "" : "";
-    const modelName = selectedOpt ? selectedOpt.value : "";
-
     try {
       const resp = await fetch("/api/connect", {
         method: "POST",
@@ -1910,8 +1894,6 @@ function showFolderPicker() {
         body: JSON.stringify({
           type: "new",
           folderPath: path,
-          provider,
-          model: modelName,
         }),
       });
 
@@ -1934,14 +1916,10 @@ function showFolderPicker() {
       clearChatState();
 
       const folderName = path.split("/").filter(Boolean).pop();
-      if (provider && modelName) {
-        addSystemMessage(`Opened project: ${folderName} (${provider}/${modelName})`);
-      } else {
-        addSystemMessage(`Opened project: ${folderName}`);
-      }
+      addSystemMessage(`Opened project: ${folderName}`);
 
-      // Populate header model select and load history
-      populateHeaderModelSelect(availableModels, provider && modelName ? `${provider}/${modelName}` : null);
+      // Load history
+      populateHeaderModelSelect(availableModels, null);
       setTimeout(() => {
         loadMessageHistory();
         updateTokenInfo();
