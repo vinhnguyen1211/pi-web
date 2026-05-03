@@ -755,6 +755,11 @@ async function loadMessageHistory() {
               textEl.className = "assistant-text";
               textEl.innerHTML = renderMarkdown(block.text);
               bubble.appendChild(textEl);
+            } else if (block.type === "thinking" && block.thinking) {
+              const thinkEl = document.createElement("div");
+              thinkEl.className = "thinking-block";
+              thinkEl.textContent = block.thinking;
+              bubble.appendChild(thinkEl);
             } else if (block.type === "toolCall") {
               const toolName = block.name || block.toolName || "tool";
               const argsStr = typeof block.arguments === "string"
